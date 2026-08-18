@@ -41,7 +41,16 @@ export default function App() {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [railOpen, setRailOpen] = useState(true);
+  /**
+   * Open on a desktop, closed on a phone. On mobile the sidebar is a
+   * slide-over drawer covering most of the screen, so defaulting it open
+   * would greet every phone user with the chat list instead of the chat.
+   * Read once at mount rather than tracked on resize — someone rotating a
+   * phone should not have the drawer appear or vanish under them.
+   */
+  const [railOpen, setRailOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth > 860,
+  );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -209,12 +218,26 @@ export default function App() {
 
   return (
     <div className={`shell${railOpen ? "" : " rail-closed"}`}>
+      {/* Mobile only (removed by CSS above 860px): tapping beside the drawer
+          closes it, which is the gesture people expect from a slide-over.
+          Deliberately hidden from assistive tech and out of the tab order —
+          it is a pointer convenience that duplicates the labelled toggle in
+          the topbar, and an unnamed button in the a11y tree is worse than no
+          button at all. */}
+      <div
+        className="rail-scrim"
+        aria-hidden="true"
+        onClick={() => setRailOpen(false)}
+      />
       <Sidebar
         chats={chats}
         activeChatId={chatId}
         busy={busy}
-        onNewChat={newChat}
-        onOpenChat={openChat}
+        /* On a phone the drawer covers the conversation, so picking a chat or
+           starting a new one has to dismiss it — otherwise the user taps and
+           appears to land nowhere. */
+        onNewChat={() => { newChat(); if (window.innerWidth <= 860) setRailOpen(false); }}
+        onOpenChat={(id) => { openChat(id); if (window.innerWidth <= 860) setRailOpen(false); }}
         onDeleteChat={removeChat}
       />
 
