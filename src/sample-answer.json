@@ -1,0 +1,176 @@
+{
+  "answer": "**Projected bookings: 761 next month**, rising to about 797 by November.\n\nThe trend is up roughly 20 consignments a month. The range widens the further out you look \u2014 November could land anywhere between 695 and 899 \u2014 so treat the direction as firm and the exact figure as indicative.\n\nWith fewer than 24 months of history the model could not fit seasonality, so the March year-end peak is not reflected.",
+  "hops": 3,
+  "trace": [
+    {
+      "tool": "run_sql",
+      "status": "ok",
+      "intent": "Monthly booking history",
+      "sql": "SELECT booking_month_key AS period, count(*) AS consignments\nFROM vw_consignment_detail\nGROUP BY booking_month_key\nORDER BY booking_month_key",
+      "rowCount": 12,
+      "durationMs": 880,
+      "rows": [
+        {
+          "period": "2025-09",
+          "consignments": "520"
+        },
+        {
+          "period": "2025-10",
+          "consignments": "568"
+        },
+        {
+          "period": "2025-11",
+          "consignments": "601"
+        },
+        {
+          "period": "2025-12",
+          "consignments": "559"
+        },
+        {
+          "period": "2026-01",
+          "consignments": "612"
+        },
+        {
+          "period": "2026-02",
+          "consignments": "640"
+        },
+        {
+          "period": "2026-03",
+          "consignments": "731"
+        },
+        {
+          "period": "2026-04",
+          "consignments": "668"
+        },
+        {
+          "period": "2026-05",
+          "consignments": "690"
+        },
+        {
+          "period": "2026-06",
+          "consignments": "655"
+        },
+        {
+          "period": "2026-07",
+          "consignments": "712"
+        },
+        {
+          "period": "2026-08",
+          "consignments": "744"
+        }
+      ]
+    },
+    {
+      "tool": "run_forecast",
+      "status": "ok",
+      "rowCount": 12,
+      "rows": [
+        {
+          "period": "2025-09",
+          "actual": 520,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2025-10",
+          "actual": 568,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2025-11",
+          "actual": 601,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2025-12",
+          "actual": 559,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-01",
+          "actual": 612,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-02",
+          "actual": 640,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-03",
+          "actual": 731,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-04",
+          "actual": 668,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-05",
+          "actual": 690,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-06",
+          "actual": 655,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-07",
+          "actual": 712,
+          "forecast": null,
+          "lower": null,
+          "upper": null
+        },
+        {
+          "period": "2026-08",
+          "actual": 744,
+          "forecast": 744,
+          "lower": 744,
+          "upper": 744
+        },
+        {
+          "period": "2026-09",
+          "actual": null,
+          "forecast": 761,
+          "lower": 690,
+          "upper": 832
+        },
+        {
+          "period": "2026-10",
+          "actual": null,
+          "forecast": 779,
+          "lower": 694,
+          "upper": 864
+        },
+        {
+          "period": "2026-11",
+          "actual": null,
+          "forecast": 797,
+          "lower": 695,
+          "upper": 899
+        }
+      ]
+    }
+  ]
+}
