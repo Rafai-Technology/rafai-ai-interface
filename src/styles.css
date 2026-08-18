@@ -1057,7 +1057,20 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
      the topbar, and pressing it did nothing at all. It is now a slide-over
      drawer instead: off-canvas by default, over the conversation when
      opened, dismissed by the scrim or by picking a chat. */
-  .shell { grid-template-columns: 1fr; }
+  /* BOTH selectors, and this is load-bearing rather than belt-and-braces.
+     `.shell.rail-closed` (specificity 0,2,0) is declared for the desktop
+     collapse animation and beats a bare `.shell` (0,1,0) no matter which
+     comes later — media queries add no specificity of their own. Overriding
+     only `.shell` left the closed state on a two-column `0 1fr` grid, and
+     since the drawer below is `position: fixed` and therefore out of flow,
+     `.workspace` fell into that ZERO-WIDTH first column and the whole page
+     rendered one character per line. The drawer is positioned, so the grid
+     here must be a single column in every state. */
+  .shell,
+  .shell.rail-closed { grid-template-columns: 1fr; }
+  /* Nothing to animate once there is only ever one column, and animating it
+     made the closed->open transition briefly reflow the conversation. */
+  .shell { transition: none; }
 
   .sidebar {
     position: fixed;
