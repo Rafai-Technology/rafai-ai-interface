@@ -5,6 +5,7 @@ import { forecastChart, inferChart, parseAnswer, rowsForChart } from '../answer'
 import { exportAsPdf, exportRowsAsCsv, provenanceFrom } from '../export';
 import { ChartRenderer } from './ChartRenderer';
 import { ExportFileCard } from './ExportFileCard';
+import { IconFile } from './icons';
 import { Markdown } from './Markdown';
 import { SqlInspector } from './SqlInspector';
 
@@ -162,6 +163,19 @@ export function ChatPanel({ turns, mode }: Props) {
           <div className="question">
             <span className="who">{turn.role.replace(/_/g, ' ').toLowerCase()}</span>
             {turn.question}
+            {/* What was attached when this was sent. The composer is cleared
+                on send, so without this the record of which files went with
+                which question would be lost. */}
+            {turn.sentAttachments?.length ? (
+              <span className="question-files">
+                {turn.sentAttachments.map((a) => (
+                  <span key={a.id} className="question-file" title={a.filename}>
+                    <IconFile />
+                    {a.filename}
+                  </span>
+                ))}
+              </span>
+            ) : null}
           </div>
           <div className="answer" aria-live="polite" aria-atomic="false">
             <Answer turn={turn} mode={mode} />

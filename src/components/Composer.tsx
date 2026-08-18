@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { useSpeechInput } from '../hooks/useSpeechInput';
 import type { Attachment } from '../types';
-import { IconAttach, IconFile, IconMic, IconSend, IconStop } from './icons';
+import { IconAttach, IconClose, IconFile, IconMic, IconSend, IconStop } from './icons';
 
 interface Props {
   value: string;
@@ -14,6 +14,9 @@ interface Props {
   attachBusy?: boolean;
   attachError?: string | null;
   onAttach?: (files: FileList) => void;
+  /** Detaches a file from the conversation. Without this the only way to stop
+   *  a file reaching the model is to start a new chat. */
+  onRemoveAttachment?: (attachmentId: string) => void;
 }
 
 const ACCEPTED = '.csv,.txt,.xlsx';
@@ -31,6 +34,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer
   {
     value, busy, placeholder, onChange, onSubmit,
     attachments = [], attachBusy = false, attachError = null, onAttach,
+    onRemoveAttachment,
   },
   ref,
 ) {
@@ -67,8 +71,23 @@ export const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer
               title={`${a.filename} · ${formatBytes(a.bytes)}${a.truncated ? ' · shown up to the size cap' : ''}`}
             >
               <IconFile />
-              {a.filename}
+              <span className="attachment-chip-name">{a.filename}</span>
               {a.truncated && <span className="attachment-chip-flag">truncated</span>}
+              {onRemoveAttachment && (
+                <button
+                  type="button"
+                  className="attachment-chip-remove"
+                  onClick={() => onRemoveAttachment(a.id)}
+                  disabled={busy || attachBusy}
+                  /* Named per file, not a bare "Remove": with several chips in
+                     a row a screen reader would otherwise announce the same
+                     label repeatedly with no way to tell them apart. */
+                  aria-label={`Remove ${a.filename}`}
+                  title={`Remove ${a.filename}`}
+                >
+                  <IconClose />
+                </button>
+              )}
             </span>
           ))}
           {attachBusy && (

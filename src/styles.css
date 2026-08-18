@@ -423,6 +423,46 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 .attachment-chip svg { flex: none; color: var(--muted); }
 .attachment-chip.uploading { color: var(--muted); font-style: italic; }
+/* Chip name truncates rather than stretching the chip past the composer. */
+.attachment-chip-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+
+/* Detach. Muted until hovered so a row of chips does not read as a row of
+   delete buttons, but always present — a control you have to discover is not
+   a control. */
+.attachment-chip-remove {
+  flex: none;
+  display: grid; place-items: center;
+  width: 18px; height: 18px; padding: 0; margin-left: 1px;
+  border: none; border-radius: 50%;
+  background: transparent; color: var(--muted);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.attachment-chip-remove:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--critical) 15%, transparent);
+  color: var(--critical);
+}
+.attachment-chip-remove:disabled { opacity: 0.4; }
+
+/* Files shown on the sent message. Inside the accent-coloured question
+   bubble, so they borrow white rather than the page's text colour. */
+.question-files {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.22);
+}
+.question-file {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 220px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 11.5px; color: #fff;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.question-file svg { flex: none; opacity: 0.85; }
+
 .attachment-chip-flag {
   font-size: 10px; color: var(--warning);
   text-transform: uppercase; letter-spacing: 0.04em;
@@ -1131,6 +1171,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   /* ------------------------------------------------------ touch targets ---
      44px is the smallest reliably tappable control; these were 32-38px. */
   .send, .mic, .attach { width: 44px; height: 44px; }
+  /* Small close targets are the hardest thing to hit on a phone. */
+  .attachment-chip-remove { width: 26px; height: 26px; }
+  .attachment-chip { padding: 6px 8px 6px 10px; }
   .rail-toggle { width: 40px; height: 40px; }
   .suggestion { padding: 11px 16px; }
   .download-menu-list button { padding: 11px 12px; }

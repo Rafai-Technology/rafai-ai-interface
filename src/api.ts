@@ -131,6 +131,19 @@ export async function uploadAttachment(
   return json(res);
 }
 
+export async function deleteAttachment(
+  conversationId: string,
+  attachmentId: string,
+): Promise<void> {
+  const res = await fetch(
+    url(`/agent/conversations/${conversationId}/attachments/${attachmentId}`),
+    { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
+  );
+  // Surfaced rather than swallowed: if the delete failed the file is still in
+  // the model's context, and showing the chip as gone would be a lie.
+  if (!res.ok) await json(res);
+}
+
 export async function listAttachments(conversationId: string): Promise<Attachment[]> {
   const res = await fetch(url(`/agent/conversations/${conversationId}/attachments`), {
     headers: { Authorization: `Bearer ${token}` },

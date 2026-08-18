@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ask, conversationTurns, conversations, deleteConversation, listAttachments,
+  ask, conversationTurns, conversations, deleteAttachment, deleteConversation, listAttachments,
   listRoles, schema, switchRole, uploadAttachment,
 } from './api';
 import { useTheme } from './theme';
@@ -103,8 +103,19 @@ export default function App() {
       if (!q || busy) return;
 
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setTurns((t) => [...t, { id, question: q, role: active, pending: true }]);
+      /* The files ride along with the message they were sent with, and the
+         composer is cleared. They stay attached to the CONVERSATION server-side
+         and keep reaching the model on later turns — which is why every answer
+         still prints "In context for this answer". Clearing the composer tidies
+         the input without hiding that fact. */
+      const sent = attachments;
+      setTurns((t) => [
+        ...t,
+        { id, question: q, role: active, pending: true, sentAttachments: sent.length ? sent : undefined },
+      ]);
       setDraft('');
+      setAttachments([]);
+      setAttachError(null);
       setBusy(true);
 
       try {
@@ -132,7 +143,27 @@ export default function App() {
         inputRef.current?.focus();
       }
     },
-    [active, busy, chatId],
+    [active, busy, chatId, attachments],
+  );
+
+  /**
+   * Detaching a file removes it from the conversation server-side, so it stops
+   * being fed to the model on every later turn. The chip is only removed from
+   * the UI once the server confirms — showing it gone while it is still in
+   * context would be exactly the kind of quiet lie this product avoids.
+   */
+  const removeAttachment = useCallback(
+    async (attachmentId: string) => {
+      if (!chatId) { setAttachments((prev) => prev.filter((a) => a.id !== attachmentId)); return; }
+      setAttachError(null);
+      try {
+        await deleteAttachment(chatId, attachmentId);
+        setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+      } catch (e: any) {
+        setAttachError(e.message ?? 'Could not remove that file.');
+      }
+    },
+    [chatId],
   );
 
   /** A new chat is simply no thread yet — the first question creates one. */
@@ -305,6 +336,7 @@ export default function App() {
                 attachBusy={attachBusy}
                 attachError={attachError}
                 onAttach={handleAttach}
+                onRemoveAttachment={removeAttachment}
               />
 
               <div className="suggestions">
@@ -333,6 +365,7 @@ export default function App() {
               attachBusy={attachBusy}
               attachError={attachError}
               onAttach={handleAttach}
+              onRemoveAttachment={removeAttachment}
             />
           </div>
         )}

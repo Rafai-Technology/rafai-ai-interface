@@ -102,6 +102,10 @@ export interface Turn {
   id: string;
   question: string;
   role: string;
+  /** Files that were attached when this question was sent, shown on the
+   *  message itself so the composer can be cleared without losing the record
+   *  of what went with it. */
+  sentAttachments?: Attachment[];
   result?: AskResult;
   error?: string;
   pending: boolean;

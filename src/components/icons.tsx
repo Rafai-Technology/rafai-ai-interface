@@ -84,6 +84,12 @@ export const IconFile = () => (
   </svg>
 );
 
+export const IconClose = () => (
+  <svg {...base} width={12} height={12} strokeWidth={2.2}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
 export const IconDownload = () => (
   <svg {...base} width={14} height={14}>
     <path d="M12 3v12M6.5 10.5 12 16l5.5-5.5" />
