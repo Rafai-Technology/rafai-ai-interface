@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import type { ChartSpec, TraceStep } from '../types';
 import { PALETTE, type Mode } from '../theme';
+import { makeCategoryFormat } from '../format';
 import { exportAsPdf, exportChartAsPng, exportRowsAsCsv, provenanceFrom } from '../export';
 import { ExportFileCard } from './ExportFileCard';
 import { IconDownload } from './icons';
@@ -75,6 +76,31 @@ function compact(n: number): string {
 function label(key: string): string {
   return key.replace(/_/g, ' ').replace(/\bpct\b/, '%');
 }
+
+/** Live width of an element, so tick density is decided from real pixels
+ *  rather than a guess about the viewport. 0 until first measurement. */
+function useMeasuredWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      // Rounded so a sub-pixel reflow does not re-render the chart forever.
+      setWidth(Math.round(w));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
+/** Approximate advance width of the axis font, in px per character. Used only
+ *  to decide how many labels fit; being a little pessimistic is the safe
+ *  direction, since the cost is a rotated label rather than an overlap. */
+const CHAR_PX = 6.9;
+/** Horizontal room one rotated label needs before it touches its neighbour. */
+const ROTATED_LABEL_PX = AXIS_FONT + 4;
 
 /** Guards against the one theoretical race — a click landing before Recharts'
  *  ResizeObserver has sized the SVG — rather than asserting it away. */
@@ -221,14 +247,17 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
           />
         )}
         <div className="stat-row">
-          {data.map((row, i) => (
-            <div className="stat" key={i}>
-              <div className="stat-value">
-                {isNumeric(row[series[0]]) ? compact(Number(row[series[0]])) : '—'}
+          {(() => {
+            const fmt = makeCategoryFormat(data.map((r) => r[spec.x]));
+            return data.map((row, i) => (
+              <div className="stat" key={i}>
+                <div className="stat-value">
+                  {isNumeric(row[series[0]]) ? compact(Number(row[series[0]])) : '—'}
+                </div>
+                <div className="stat-label">{fmt.short(row[spec.x])}</div>
               </div>
-              <div className="stat-label">{String(row[spec.x])}</div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </figure>
     );
@@ -452,6 +481,7 @@ function Forecast({
 }: { data: Record<string, any>[]; x: string; mode: Mode }) {
   const p = PALETTE[mode];
   const handoff = [...data].reverse().find((r) => isNumeric(r.actual))?.[x];
+  const fmt = makeCategoryFormat(data.map((r) => r[x]));
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -462,6 +492,8 @@ function Forecast({
           stroke={p.axis}
           tick={{ fill: p.muted, fontSize: AXIS_FONT }}
           tickLine={false}
+          tickFormatter={fmt.short}
+          minTickGap={12}
         />
         <YAxis
           stroke={p.axis}
@@ -478,6 +510,7 @@ function Forecast({
             color: p.text,
             fontSize: 12,
           }}
+          labelFormatter={(v: any) => fmt.full(v)}
           formatter={(v: any, name: string) => {
             // The band's dataKey yields a [lower, upper] pair, and history rows
             // yield [null, null]. Number([null,null]) is NaN, which is what was
@@ -554,6 +587,10 @@ function Forecast({
 function DataTable({
   data, x, series,
 }: { data: Record<string, any>[]; x: string; series: string[] }) {
+  // Same formatter the axis uses: the table is the accessible view of the
+  // chart, and the two disagreeing about what a row is called is worse than
+  // either format on its own.
+  const fmt = makeCategoryFormat(data.map((r) => r[x]));
   return (
     <div className="table-scroll">
       <table className="data-table">
@@ -566,7 +603,7 @@ function DataTable({
         <tbody>
           {data.map((row, i) => (
             <tr key={i}>
-              <td>{String(row[x])}</td>
+              <td>{fmt.short(row[x])}</td>
               {series.map((y) => (
                 <td key={y} className="num">
                   {isNumeric(row[y]) ? Number(row[y]).toLocaleString('en-IN') : '—'}
@@ -592,6 +629,19 @@ function Plot({
   height: number;
 }) {
   const p = PALETTE[mode];
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const measured = useMeasuredWidth(wrapRef);
+
+  const fmt = useMemo(() => makeCategoryFormat(data.map((r) => r[x])), [data, x]);
+  const num = (v: any) => (isNumeric(v) ? Number(v).toLocaleString('en-IN') : '—');
+
+  // Narrow cards get a shorter plot and a tighter y-axis gutter: on a phone the
+  // chart competes with the answer text for the fold, and 52px of axis is a
+  // tenth of the screen.
+  const narrow = measured > 0 && measured < 430;
+  const plotHeight = narrow ? Math.min(height, 208) : height;
+  const yAxisWidth = narrow ? 38 : 52;
+
   const tooltipStyle = {
     background: p.surface,
     border: `1px solid ${p.grid}`,
@@ -605,23 +655,78 @@ function Plot({
     tick: { fill: p.muted, fontSize: AXIS_FONT },
     tickLine: false,
   };
-  const crowded = data.length > 7;
+
   // Past this many bars, squeezing everything into the card's fixed width
   // makes every label overlap its neighbours no matter how they're rotated —
   // give each bar a real minimum width instead and let the card scroll.
   const manyBars = type === 'bar' && data.length > SCROLL_BAR_COUNT;
+
+  /**
+   * How the category labels are laid out, decided from the measured card and
+   * the labels that will actually be drawn — not from a row count.
+   *
+   * The old rule rotated at more than seven categories and always drew every
+   * tick. With raw ISO timestamps that still overlapped at seven, and with
+   * short labels it rotated when there was ample room. Ticks are only thinned
+   * once rotation alone cannot separate them, because a dropped tick is lost
+   * information and a rotated one is not.
+   */
+  const layout = useMemo(() => {
+    const labels = data.map((r) => fmt.short(r[x]));
+    const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
+    const flatPx = longest * CHAR_PX + 12;
+    // When the card scrolls, the drawing surface is the min-width we force,
+    // not the visible card — each bar is guaranteed MIN_BAR_PX of it.
+    const plotPx = manyBars
+      ? data.length * MIN_BAR_PX
+      : Math.max(0, measured - yAxisWidth - 20);
+
+    if (plotPx <= 0) {
+      // Pre-measurement: assume rotation rather than flat, so the first paint
+      // is never the overlapping one.
+      return { angle: -35, interval: 0, height: Math.min(84, 24 + longest * 4.4) };
+    }
+    if (plotPx >= data.length * flatPx) {
+      return { angle: 0, interval: 0, height: 30 };
+    }
+    const rotatedFit = Math.floor(plotPx / ROTATED_LABEL_PX);
+    const interval = rotatedFit >= data.length
+      ? 0
+      : Math.max(0, Math.ceil(data.length / Math.max(1, rotatedFit)) - 1);
+    return { angle: -35, interval, height: Math.min(84, 24 + longest * 4.4) };
+  }, [data, x, fmt, measured, manyBars, yAxisWidth]);
+
+  const categoryAxis = {
+    dataKey: x,
+    ...axisProps,
+    tickFormatter: fmt.short,
+    interval: layout.interval,
+    angle: layout.angle,
+    textAnchor: layout.angle === 0 ? ('middle' as const) : ('end' as const),
+    height: layout.height,
+    minTickGap: 0,
+  };
+
+  const sharedTooltip = {
+    contentStyle: tooltipStyle,
+    // The axis is abbreviated to fit; the tooltip is where the unambiguous
+    // value belongs, so it carries the full date and a grouped number.
+    labelFormatter: (v: any) => fmt.full(v),
+    formatter: (v: any, name: string) => [num(v), label(name)] as [string, string],
+  };
+
   const legend = series.length > 1 && (
     <Legend wrapperStyle={{ fontSize: 12, color: p.secondary }} />
   );
 
   const plot = (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={plotHeight}>
       {type === 'line' ? (
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
           <CartesianGrid stroke={p.grid} strokeWidth={1} vertical={false} />
-          <XAxis dataKey={x} {...axisProps} />
-          <YAxis {...axisProps} tickFormatter={compact} width={52} />
-          <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: p.axis, strokeWidth: 1 }} />
+          <XAxis {...categoryAxis} />
+          <YAxis {...axisProps} tickFormatter={compact} width={yAxisWidth} />
+          <Tooltip {...sharedTooltip} cursor={{ stroke: p.axis, strokeWidth: 1 }} />
           {legend}
           {series.map((y, i) => (
             <Line
@@ -639,14 +744,17 @@ function Plot({
         </LineChart>
       ) : type === 'pie' ? (
         <PieChart>
-          <Tooltip contentStyle={tooltipStyle} />
-          <Legend wrapperStyle={{ fontSize: 12, color: p.secondary }} />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            formatter={(v: any, name: string) => [num(v), fmt.short(name)] as [string, string]}
+          />
+          <Legend wrapperStyle={{ fontSize: 12, color: p.secondary }} formatter={fmt.short} />
           <Pie
             data={data}
             dataKey={series[0]}
             nameKey={x}
-            innerRadius={52}
-            outerRadius={92}
+            innerRadius={narrow ? 40 : 52}
+            outerRadius={narrow ? 70 : 92}
             paddingAngle={2}
             stroke={p.surface}
             strokeWidth={2}
@@ -660,16 +768,9 @@ function Plot({
       ) : (
         <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
           <CartesianGrid stroke={p.grid} strokeWidth={1} vertical={false} />
-          <XAxis
-            dataKey={x}
-            {...axisProps}
-            interval={0}
-            angle={crowded ? -30 : 0}
-            textAnchor={crowded ? 'end' : 'middle'}
-            height={crowded ? 62 : 30}
-          />
-          <YAxis {...axisProps} tickFormatter={compact} width={52} />
-          <Tooltip contentStyle={tooltipStyle} cursor={{ fill: p.grid, fillOpacity: 0.35 }} />
+          <XAxis {...categoryAxis} />
+          <YAxis {...axisProps} tickFormatter={compact} width={yAxisWidth} />
+          <Tooltip {...sharedTooltip} cursor={{ fill: p.grid, fillOpacity: 0.35 }} />
           {legend}
           {series.map((y, i) => (
             <Bar
@@ -689,15 +790,15 @@ function Plot({
     </ResponsiveContainer>
   );
 
-  if (!manyBars) return plot;
+  if (!manyBars) return <div ref={wrapRef}>{plot}</div>;
 
   // The inner div's min-width is a floor, not a fixed size: it fills the
   // card as normal up to that many bars' worth of room, and only forces the
   // outer div into horizontal scroll once there are more bars than the card
   // can show at a legible width.
   return (
-    <div className="chart-scroll">
-      <div style={{ minWidth: data.length * MIN_BAR_PX, height }}>
+    <div className="chart-scroll" ref={wrapRef}>
+      <div style={{ minWidth: data.length * MIN_BAR_PX, height: plotHeight }}>
         {plot}
       </div>
     </div>

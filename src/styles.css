@@ -1197,6 +1197,20 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   /* Wide content scrolls inside its own box rather than the page. */
   .viz { padding: 12px 10px; }
   .sql { font-size: 11px; }
+
+  /* On a phone the head stacks: a title and four controls on one row leaves
+     the title two words wide. Actions go full width underneath and stay
+     left-aligned so the thumb reaches them. */
+  .viz-head { align-items: flex-start; gap: 8px; }
+  .viz-actions { width: 100%; }
+
+  /* The chart itself is already fluid — this is the horizontal-scroll
+     affordance for the many-bars case, which must scroll inside the card and
+     never widen the page. */
+  .chart-scroll { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+
+  /* Stat tiles wrap to one per line rather than being squeezed side by side. */
+  .stat-row { gap: 16px 20px; }
 }
 
 /* Very small phones: the role picker and theme toggle together crowd the
@@ -1206,4 +1220,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .rolepick select { max-width: 30vw; font-size: 12.5px; padding: 6px 8px; }
   .ghost { padding: 6px 9px; font-size: 12px; }
   .question { max-width: 96%; }
+
+  /* The type switch and Download are the two controls worth keeping at a
+     comfortable tap size; the card loses padding before they do. */
+  .viz { padding: 10px 8px; }
+  .viz-title { font-size: 13px; }
 }
