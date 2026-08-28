@@ -7,6 +7,7 @@ import { ChartRenderer } from './ChartRenderer';
 import { ExportFileCard } from './ExportFileCard';
 import { IconFile } from './icons';
 import { Markdown } from './Markdown';
+import { SaveDashboardDialog, panelsFromTurn } from './SaveDashboardDialog';
 import { SqlInspector } from './SqlInspector';
 
 /** The last query result in the trace, regardless of whether it matched a
@@ -55,6 +56,11 @@ function TableExportCard({ request, trace, role }: {
 interface Props {
   turns: Turn[];
   mode: Mode;
+  /** Which thread these turns belong to, so a saved feature can be traced
+   *  back to the conversation that produced it. */
+  conversationId?: string | null;
+  /** Called after a feature is created, so the shell can navigate to it. */
+  onFeatureCreated?: (id: string) => void;
 }
 
 /**
@@ -87,6 +93,43 @@ function Waiting() {
           Still going — the free-tier model queues under load. A paid key
           answers this in a few seconds.
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The offer to keep this answer as a live dashboard.
+ *
+ * Shown only when the turn actually ran a query, because a panel with no query
+ * has nothing to re-run — and re-running is the entire feature. An answer the
+ * model wrote from context alone is not something that can be kept live.
+ */
+function KeepAsFeature({ turn, conversationId, onCreated }: {
+  turn: Turn;
+  conversationId?: string | null;
+  onCreated?: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  if (!turn.result || panelsFromTurn(turn).length === 0) return null;
+
+  return (
+    <div className="keep-row">
+      {saved ? (
+        <span className="keep-done">Saved to Features — it refreshes each time you open it.</span>
+      ) : (
+        <button type="button" className="keep-btn" onClick={() => setOpen(true)}>
+          Create feature
+        </button>
+      )}
+      {open && (
+        <SaveDashboardDialog
+          turn={turn}
+          conversationId={conversationId ?? null}
+          onClose={() => setOpen(false)}
+          onSaved={(id) => { setOpen(false); setSaved(true); onCreated?.(id); }}
+        />
       )}
     </div>
   );
@@ -149,7 +192,7 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
   );
 }
 
-export function ChatPanel({ turns, mode }: Props) {
+export function ChatPanel({ turns, mode, conversationId, onFeatureCreated }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -179,6 +222,11 @@ export function ChatPanel({ turns, mode }: Props) {
           </div>
           <div className="answer" aria-live="polite" aria-atomic="false">
             <Answer turn={turn} mode={mode} />
+            <KeepAsFeature
+              turn={turn}
+              conversationId={conversationId}
+              onCreated={onFeatureCreated}
+            />
           </div>
         </article>
       ))}

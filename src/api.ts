@@ -1,5 +1,6 @@
 import type {
-  Attachment, AskResult, Conversation, HistoryTurn, RoleInfo, Tile,
+  Attachment, AskResult, ConversationPage, DashboardDefinition, DashboardRun,
+  DashboardSummary, HistoryTurn, Me, NewPanel, RoleInfo, Tile,
 } from './types';
 
 const TOKEN_KEY = 'rafai-ai-token';
@@ -90,11 +91,24 @@ export async function overview(): Promise<Tile[]> {
   return json<Tile[]>(res);
 }
 
-export async function conversations(): Promise<Conversation[]> {
-  const res = await fetch(url('/agent/conversations'), {
+/**
+ * One page of threads, newest first.
+ *
+ * Cursor-paged rather than offset-paged: the list reorders itself every time an
+ * answer lands, so an offset would skip or repeat whatever moved while the user
+ * was reading. Pass the previous `nextCursor` to get the next page; a null one
+ * means the end.
+ */
+export async function conversations(
+  opts: { limit?: number; cursor?: string | null } = {},
+): Promise<ConversationPage> {
+  const q = new URLSearchParams();
+  if (opts.limit) q.set('limit', String(opts.limit));
+  if (opts.cursor) q.set('cursor', opts.cursor);
+  const res = await fetch(url(`/agent/conversations${q.toString() ? `?${q}` : ''}`), {
     headers: { Authorization: `Bearer ${token}` },
   });
-  return json<Conversation[]>(res);
+  return json<ConversationPage>(res);
 }
 
 export async function conversationTurns(id: string): Promise<HistoryTurn[]> {
@@ -149,4 +163,106 @@ export async function listAttachments(conversationId: string): Promise<Attachmen
     headers: { Authorization: `Bearer ${token}` },
   });
   return json<Attachment[]>(res);
+}
+
+/* ---------------------------------------------------------------- features */
+
+/**
+ * Saved dashboards.
+ *
+ * `runDashboard` is a POST because opening a dashboard is not a read of stored
+ * state — it executes every panel against the customer's database, under the
+ * caller's own role and branch scope, and writes an audit row for each. The
+ * rows come back fresh every time; nothing about them is cached, here or on
+ * the server.
+ */
+export async function listDashboards(): Promise<DashboardSummary[]> {
+  const res = await fetch(url('/dashboards'), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return json<DashboardSummary[]>(res);
+}
+
+export async function createDashboard(body: {
+  title: string;
+  description?: string;
+  conversation_id?: string | null;
+  panels: NewPanel[];
+}): Promise<{ id: string }> {
+  const res = await fetch(url('/dashboards'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return json<{ id: string }>(res);
+}
+
+export async function runDashboard(id: string): Promise<DashboardRun> {
+  const res = await fetch(url(`/dashboards/${id}/run`), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return json<DashboardRun>(res);
+}
+
+/**
+ * A dashboard's definition, without running it.
+ *
+ * Use this for an edit screen or anywhere the name and queries are wanted but
+ * the figures are not — `runDashboard` executes every panel against the
+ * customer's database and writes an audit row per panel.
+ */
+export async function getDashboard(id: string): Promise<DashboardDefinition> {
+  const res = await fetch(url(`/dashboards/${id}`), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return json<DashboardDefinition>(res);
+}
+
+/** Replaces the panels — how a saved query gets corrected. */
+export async function updateDashboardPanels(
+  id: string,
+  panels: NewPanel[],
+): Promise<{ id: string; panels: number }> {
+  const res = await fetch(url(`/dashboards/${id}/panels`), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ panels }),
+  });
+  return json<{ id: string; panels: number }>(res);
+}
+
+export async function renameDashboard(id: string, title: string): Promise<void> {
+  const res = await fetch(url(`/dashboards/${id}`), {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error('Could not rename that dashboard');
+}
+
+/**
+ * Who the server says you are.
+ *
+ * Prefer this over decoding the JWT in the browser: a client-side decode is
+ * unverified, so it yields a claim rather than a fact, and it is the server's
+ * copy that every access decision is actually made from.
+ */
+export async function me(): Promise<Me> {
+  const res = await fetch(url('/auth/me'), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return json<Me>(res);
+}
+
+export async function health(): Promise<{ status: string; control_store: string; time: string }> {
+  return json(await fetch(url('/health')));
+}
+
+export async function deleteDashboard(id: string): Promise<void> {
+  const res = await fetch(url(`/dashboards/${id}`), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Could not delete that dashboard');
 }

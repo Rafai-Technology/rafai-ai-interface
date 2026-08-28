@@ -1226,3 +1226,495 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .viz { padding: 10px 8px; }
   .viz-title { font-size: 13px; }
 }
+
+/* ============================================================ features tab
+   Saved dashboards. Scanned and operated rather than read, so the work here is
+   information design: content decides a panel's size, state is carried in form
+   as well as words, and the numbers are set to be read at a glance.
+   Built entirely on the existing tokens, so both themes come for free. */
+
+.tabs {
+  display: flex; gap: 4px; padding: 0 20px;
+  border-bottom: 1px solid var(--border); background: var(--plane);
+}
+.tab {
+  appearance: none; background: none; border: 0; cursor: pointer; font: inherit;
+  font-size: 13px; padding: 11px 4px 10px; margin-right: 14px; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.tab:hover { color: var(--text); }
+.tab.is-on { color: var(--text); border-bottom-color: var(--accent-deep); font-weight: 600; }
+
+.feat { padding: 26px 22px 48px; max-width: 1320px; margin: 0 auto; }
+
+/* ---- list ---- */
+.feat-head { margin-bottom: 22px; }
+.feat-head h2 { margin: 0 0 5px; font-size: 21px; letter-spacing: -0.01em; }
+.feat-head p { margin: 0; color: var(--secondary); font-size: 13.5px; max-width: 64ch; line-height: 1.55; }
+
+.feat-empty {
+  border: 1px dashed var(--border); border-radius: 14px; padding: 46px 28px;
+  text-align: center; background: var(--surface);
+}
+.feat-empty-mark { display: flex; gap: 5px; justify-content: center; margin-bottom: 16px; }
+.feat-empty-mark span {
+  width: 26px; height: 34px; border-radius: 5px; background: var(--grid);
+}
+.feat-empty-mark span:nth-child(2) { height: 44px; background: var(--axis); }
+.feat-empty h3 { margin: 0 0 6px; font-size: 15px; }
+.feat-empty p { margin: 0 auto; color: var(--muted); font-size: 13px; max-width: 46ch; line-height: 1.6; }
+
+.feat-grid {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+.feat-cell { position: relative; }
+.feat-card {
+  width: 100%; height: 100%; text-align: left; cursor: pointer; font: inherit;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 15px 15px 13px; display: grid; gap: 7px; align-content: start;
+  box-shadow: var(--shadow);
+  transition: box-shadow var(--med) var(--ease), border-color var(--med) var(--ease),
+              transform var(--med) var(--ease);
+}
+.feat-card:hover {
+  box-shadow: var(--shadow-lift); border-color: var(--axis); transform: translateY(-1px);
+}
+.feat-card-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  /* Room for the delete control, which is positioned over this corner. Without
+     it the × lands on top of the panel count. */
+  padding-right: 22px;
+}
+.feat-dots { display: flex; gap: 3px; }
+.feat-dots i { width: 13px; height: 4px; border-radius: 2px; background: var(--accent-deep); opacity: 0.34; }
+.feat-dots i:first-child { opacity: 0.8; }
+.feat-count { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.feat-name { font-size: 14.5px; font-weight: 600; line-height: 1.35; color: var(--text); }
+.feat-desc {
+  font-size: 12px; color: var(--secondary); line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.feat-foot { display: flex; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.feat-del {
+  position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; border: 0;
+  background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1;
+  border-radius: 7px; opacity: 0; transition: opacity var(--fast) var(--ease);
+}
+.feat-cell:hover .feat-del, .feat-del:focus-visible { opacity: 1; }
+.feat-del:hover { background: var(--plane); color: var(--critical); }
+.feat-confirm {
+  position: absolute; top: 8px; right: 8px; display: flex; gap: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 3px; box-shadow: var(--shadow);
+}
+.mini {
+  appearance: none; border: 0; background: none; font: inherit; font-size: 11px;
+  cursor: pointer; padding: 3px 8px; border-radius: 5px; color: var(--secondary);
+}
+.mini:hover { background: var(--plane); }
+.mini.danger { color: var(--critical); font-weight: 600; }
+
+/* ---- dashboard bar ---- */
+.dash-bar {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 18px; padding-bottom: 16px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.back {
+  appearance: none; background: none; border: 0; font: inherit; font-size: 12.5px;
+  cursor: pointer; color: var(--muted); padding: 6px 2px; display: flex; gap: 6px; align-items: center;
+}
+.back:hover { color: var(--text); }
+.dash-id { min-width: 0; }
+.dash-id h2 {
+  margin: 0; font-size: 20px; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dash-id p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+.dash-tools { display: flex; align-items: center; gap: 10px; }
+
+.live {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+  color: var(--secondary); padding: 4px 10px; border-radius: 999px;
+  background: var(--plane); border: 1px solid var(--border); white-space: nowrap;
+}
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--good);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent);
+}
+.live.is-stale { color: var(--secondary); }
+.live.is-stale .live-dot {
+  background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 24%, transparent);
+}
+.refresh {
+  appearance: none; cursor: pointer; font: inherit; font-size: 12.5px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 13px;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color var(--fast) var(--ease);
+}
+.refresh:hover:not(:disabled) { border-color: var(--accent-deep); color: var(--accent-deep); }
+.refresh:disabled { opacity: 0.6; cursor: progress; }
+.spin { display: inline-block; animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.dash-note {
+  font-size: 12.5px; color: var(--secondary); background: var(--plane);
+  border: 1px solid var(--border); border-left: 3px solid var(--warning);
+  border-radius: 8px; padding: 10px 13px; margin-bottom: 16px;
+}
+
+/* ---- the grid: 12 columns, panels claim what their content needs ---- */
+.dash-grid {
+  display: grid; grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: 14px; row-gap: 0; grid-auto-flow: dense;
+  /* A fine row unit, with each panel claiming a span. CSS Grid sizes a row by
+     its tallest item, so without this a tall table strands every short tile
+     beside it at the top of a large empty row. With it, `dense` packs two stat
+     tiles into the height of one chart and the gaps close. */
+  grid-auto-rows: 8px;
+}
+.pnl {
+  grid-column: span var(--span, 6);
+  grid-row: span var(--rows, 17);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 0; box-shadow: var(--shadow); min-width: 0;
+  /* row-gap is 0 so the span maths stays simple; the gap lives here instead. */
+  margin-bottom: 14px;
+  /* Content-sized, and NOT stretched to the grid row. Constraining the panel
+     from the same span that is derived from measuring it is a feedback loop —
+     it collapses to the smallest panel and clips everything. The panel sizes
+     itself; only the scrolling parts inside it are bounded. */
+  height: auto; align-self: start;
+}
+.pnl-inner { padding: 15px 16px 12px; display: flex; flex-direction: column; min-width: 0; }
+
+/* A tile is a summary: the table scrolls inside a fixed window rather than
+   growing the panel. The whole result is one click away in the expanded view. */
+.pnl .dt-wrap { max-height: 232px; }
+.pnl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.pnl-head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.35; }
+.pnl-tags { display: flex; gap: 5px; flex-shrink: 0; }
+.tag {
+  font-size: 10px; color: var(--muted); background: var(--plane);
+  border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+}
+.tag-warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
+.tag-quiet { opacity: 0.65; }
+
+/* stat tile */
+.pnl-figure { justify-content: flex-start; }
+.fig-set { display: flex; flex-wrap: wrap; gap: 18px 26px; }
+.fig { display: grid; gap: 3px; min-width: 0; }
+.fig-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.fig-value {
+  font-size: 27px; font-weight: 600; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.1; color: var(--text);
+}
+
+/* table */
+.dt-wrap { overflow: auto; margin: 0 -4px; padding: 0 4px; min-height: 0; }
+/* The tile's table scrolls inside the panel rather than growing it. */
+.pnl .dt-wrap { flex: 1; }
+.dt { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.dt th {
+  text-align: left; font-weight: 500; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted); padding: 0 10px 6px;
+  border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0;
+  background: var(--surface);
+}
+.dt th.num, .dt td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dt td { padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.dt tbody tr:last-child td { border-bottom: 0; }
+.dt tbody tr:hover td { background: var(--plane); }
+.dt-more { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
+.dt-all {
+  appearance: none; cursor: pointer; font: inherit; font-size: 11.5px;
+  background: none; border: 0; padding: 8px 0 2px; color: var(--accent-deep);
+  text-align: left; width: 100%;
+}
+.dt-all:hover { text-decoration: underline; }
+
+/* state */
+.pnl-state { display: grid; gap: 8px; justify-items: start; padding: 4px 0 8px; }
+.pnl-state p { margin: 0; font-size: 12.5px; color: var(--secondary); line-height: 1.5; }
+.state-badge {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+  border-radius: 5px; padding: 2px 7px; border: 1px solid;
+}
+.state-locked { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.state-error { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 45%, transparent); }
+.state-empty { color: var(--muted); border-color: var(--border); }
+.pnl-off { background: var(--plane); }
+
+.pnl-caveats {
+  margin: 12px 0 0; padding-left: 15px; font-size: 11.5px;
+  color: var(--secondary); line-height: 1.5;
+}
+.pnl-sql { margin-top: auto; padding-top: 10px; }
+.pnl-sql summary {
+  cursor: pointer; font-size: 11px; color: var(--muted); list-style: none;
+}
+.pnl-sql summary::-webkit-details-marker { display: none; }
+.pnl-sql summary::before { content: '⌄ '; }
+.pnl-sql[open] summary::before { content: '⌃ '; }
+.pnl-sql summary:hover { color: var(--accent-deep); }
+.pnl-sql pre {
+  margin: 8px 0 0; padding: 9px 11px; background: var(--plane);
+  border-radius: 7px; font-size: 10.5px; line-height: 1.6; overflow-x: auto;
+  white-space: pre-wrap; color: var(--secondary);
+}
+
+/* loading */
+.pnl.is-loading { pointer-events: none; }
+.sk { border-radius: 5px; background: var(--grid); animation: pulse 1.4s var(--ease) infinite; }
+.sk-title { height: 11px; width: 46%; }
+.sk-tag { height: 11px; width: 46px; flex: none; }
+.sk-body { width: 100%; height: 186px; border-radius: 8px; }
+.sk-foot { height: 9px; width: 92px; margin-top: 12px; }
+/* Staggered, so the row reads as several things loading rather than one block
+   flashing. */
+.pnl.is-loading:nth-child(2) .sk { animation-delay: 90ms; }
+.pnl.is-loading:nth-child(3) .sk { animation-delay: 180ms; }
+.pnl.is-loading:nth-child(4) .sk { animation-delay: 270ms; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.dash-prov {
+  margin: 20px 0 0; font-size: 11.5px; color: var(--muted);
+  padding-top: 14px; border-top: 1px solid var(--border);
+}
+
+/* ---- keep-as-feature action under an answer ---- */
+.keep-row { margin-top: 14px; }
+.keep-btn {
+  appearance: none; cursor: pointer; font: inherit; font-size: 12px;
+  background: var(--surface); color: var(--accent-deep);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.keep-btn::before { content: '＋'; font-size: 13px; line-height: 1; }
+.keep-btn:hover { border-color: var(--accent-deep); background: var(--plane); }
+.keep-done { font-size: 12px; color: var(--good); }
+
+/* ---- create-feature dialog ---- */
+.dlg-backdrop {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: rgba(11, 11, 11, 0.45); padding: 20px;
+  animation: fade var(--fast) var(--ease);
+}
+@keyframes fade { from { opacity: 0; } }
+.dlg {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 22px; width: min(640px, 100%); max-height: 86vh; overflow-y: auto;
+  box-shadow: var(--shadow-lift); animation: rise var(--med) var(--ease-out-back);
+}
+@keyframes rise { from { transform: translateY(10px); opacity: 0; } }
+.dlg-title { margin: 0 0 6px; font-size: 17px; letter-spacing: -0.01em; }
+.dlg-sub { margin: 0 0 4px; font-size: 12.5px; color: var(--secondary); line-height: 1.55; }
+.dlg-label {
+  display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); margin: 18px 0 6px;
+}
+.dlg-input {
+  width: 100%; font: inherit; font-size: 13.5px; padding: 9px 11px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--plane); color: var(--text);
+}
+.dlg-input:focus-visible { border-color: var(--accent-deep); }
+.dlg-panels { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.dlg-panels li {
+  border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px;
+  transition: border-color var(--fast) var(--ease);
+}
+.dlg-panels li:hover { border-color: var(--axis); }
+.dlg-panels label { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.dlg-panel-title { font-size: 13px; font-weight: 500; flex: 1; }
+.dlg-chip {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--accent-deep); border: 1px solid color-mix(in srgb, var(--accent-deep) 40%, transparent);
+  border-radius: 4px; padding: 1px 6px;
+}
+.dlg-sql {
+  display: block; margin-top: 7px; font-size: 10.5px; color: var(--muted);
+  white-space: pre-wrap; word-break: break-word; max-height: 3.4em; overflow: hidden;
+  line-height: 1.55;
+}
+.dlg-empty { font-size: 12.5px; color: var(--muted); margin: 0; }
+.dlg-error { margin-top: 12px; font-size: 12.5px; color: var(--critical); }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.btn-quiet {
+  appearance: none; cursor: pointer; font: inherit; font-size: 12.5px;
+  background: none; border: 1px solid var(--border); border-radius: 9px;
+  padding: 8px 15px; color: var(--secondary);
+}
+.btn-quiet:hover { color: var(--text); border-color: var(--axis); }
+.btn-primary {
+  appearance: none; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
+  background: var(--accent-deep); color: #fff; border: 1px solid var(--accent-deep);
+  border-radius: 9px; padding: 8px 17px;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- responsive: the 12-column grid collapses in two steps ---- */
+@media (max-width: 1080px) {
+  .pnl { grid-column: span min(12, calc(var(--span, 6) * 2)); }
+}
+@media (max-width: 720px) {
+  .feat { padding: 18px 14px 36px; }
+  .dash-grid { grid-template-columns: 1fr; }
+  .pnl { grid-column: 1 / -1; }
+  .dash-bar { grid-template-columns: 1fr; gap: 10px; }
+  .dash-tools { justify-content: space-between; }
+  .fig-value { font-size: 23px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feat-card, .pnl, .dlg, .dlg-backdrop, .sk, .spin { animation: none !important; transition: none !important; }
+  .feat-card:hover { transform: none; }
+}
+
+/* ---- the chart's own toolbar, inside a dashboard panel ----
+   In chat those controls are the point: someone is exploring an answer. On a
+   dashboard they are chrome sitting on top of the figure, so they recede until
+   the panel is hovered or focused. Function is unchanged — only weight. */
+.pnl .viz { border: 0; box-shadow: none; padding: 0; background: none; }
+.pnl .viz-head { margin-bottom: 6px; }
+.pnl .viz-title { font-size: 12px; }
+.pnl .viz-actions { opacity: 0.45; transform: scale(0.9); transform-origin: right center;
+  transition: opacity var(--med) var(--ease); }
+.pnl:hover .viz-actions,
+.pnl:focus-within .viz-actions { opacity: 1; }
+.pnl .chart-type-switch button, .pnl .ghost { font-size: 11px; padding: 4px 9px; }
+
+/* ---- a panel opened full size ----
+   The tile is a summary; this is where a figure gets interrogated. Chart,
+   every row behind it, the caveats and the query that produced it, together. */
+.pnl-open {
+  appearance: none; border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); cursor: pointer; width: 22px; height: 20px; padding: 0;
+  border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease),
+              border-color var(--fast) var(--ease);
+}
+.pnl:hover .pnl-open, .pnl:focus-within .pnl-open { opacity: 1; }
+.pnl-open:hover { color: var(--accent-deep); border-color: var(--accent-deep); }
+/* Touch has no hover, so the control must not depend on it. */
+@media (hover: none) { .pnl-open { opacity: 1; } }
+
+.pm-backdrop {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
+  background: rgba(11, 11, 11, 0.5); padding: 24px;
+  animation: fade var(--fast) var(--ease);
+}
+.pm {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  width: min(1080px, 100%); max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-lift); animation: rise var(--med) var(--ease-out-back);
+  overflow: hidden;
+}
+.pm-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pm-head h3 { margin: 0 0 3px; font-size: 16px; letter-spacing: -0.01em; }
+.pm-meta { margin: 0; font-size: 11.5px; color: var(--muted); }
+.pm-close {
+  appearance: none; border: 0; background: none; color: var(--muted); cursor: pointer;
+  font-size: 24px; line-height: 1; padding: 0 4px; border-radius: 7px; flex-shrink: 0;
+}
+.pm-close:hover { color: var(--text); background: var(--plane); }
+
+.pm-body { padding: 18px 20px 22px; overflow-y: auto; }
+/* Charts get real room here — the tile height is a compromise this view does
+   not have to make. */
+.pm-body .recharts-responsive-container { height: 440px !important; }
+.pm-body .viz-actions { opacity: 1; transform: none; }
+.pm-body .fig-set { gap: 26px 44px; }
+.pm-body .fig-value { font-size: 40px; }
+
+.pm-rows { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.pm-rows summary {
+  cursor: pointer; font-size: 11.5px; color: var(--muted); list-style: none;
+}
+.pm-rows summary::-webkit-details-marker { display: none; }
+.pm-rows summary::before { content: '⌄ '; }
+.pm-rows[open] summary::before { content: '⌃ '; }
+.pm-rows summary:hover { color: var(--accent-deep); }
+.pm-rows .dt-wrap { margin-top: 10px; max-height: 340px; overflow-y: auto; }
+.pm-body > .dt-wrap { max-height: 56vh; overflow-y: auto; }
+
+.pm-sql { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
+.pm-sql-label {
+  display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); margin-bottom: 7px;
+}
+.pm-sql pre {
+  margin: 0; padding: 11px 13px; background: var(--plane); border-radius: 8px;
+  font-size: 11.5px; line-height: 1.65; overflow-x: auto; white-space: pre-wrap;
+  color: var(--secondary);
+}
+
+@media (max-width: 720px) {
+  .pm-backdrop { padding: 0; align-items: stretch; }
+  .pm { max-height: 100vh; height: 100%; border-radius: 0; border: 0; }
+  .pm-body .recharts-responsive-container { height: 300px !important; }
+  .pm-body .fig-value { font-size: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pm, .pm-backdrop { animation: none !important; }
+}
+
+/* A chart drawing un-aggregated detail as a series. Stated plainly, because
+   every bar on it is wrong and nothing about the picture says so. */
+.pm-warn {
+  font-size: 12.5px; line-height: 1.6; color: var(--secondary);
+  background: var(--plane); border: 1px solid var(--border);
+  border-left: 3px solid var(--warning); border-radius: 8px;
+  padding: 11px 13px; margin-bottom: 14px;
+}
+.pm-warn strong { color: var(--text); }
+.pm-warn code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+  background: var(--surface); padding: 1px 5px; border-radius: 4px;
+}
+
+/* ---- search and sort, in the expanded table ---- */
+.ft-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.ft-search {
+  flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--plane); color: var(--text);
+}
+.ft-search:focus-visible { border-color: var(--accent-deep); }
+.ft-count { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.ft-scroll { max-height: 52vh; overflow: auto; }
+.dt th.sortable { cursor: pointer; user-select: none; }
+.dt th.sortable:hover { color: var(--text); }
+.ft-caret { display: inline-block; width: 10px; margin-left: 3px; color: var(--accent-deep); }
+.ft-none { margin: 16px 0; font-size: 12.5px; color: var(--muted); text-align: center; }
+
+/* A row cut in half by the scroll window reads as broken markup. The fade says
+   "there is more below" instead. */
+.pnl .dt-wrap {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent 100%);
+}
+
+/* ---- infinite scroll sentinel in the chat list ---- */
+.chatlist-more {
+  display: flex; align-items: center; justify-content: center;
+  height: 34px; flex: none;
+}
+.chatlist-spinner {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--grid); border-top-color: var(--accent-deep);
+  animation: spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .chatlist-spinner { animation: none; } }

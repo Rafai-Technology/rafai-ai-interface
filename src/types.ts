@@ -34,6 +34,12 @@ export interface Conversation {
   updatedAt: string;
 }
 
+/** A page of threads. `nextCursor` is null at the end of the list. */
+export interface ConversationPage {
+  items: Conversation[];
+  nextCursor: string | null;
+}
+
 export interface AskResult {
   answer: string;
   trace: TraceStep[];
@@ -120,4 +126,88 @@ export interface Tile {
   tone: 'neutral' | 'good' | 'warning' | 'critical';
   module: string;
   question: string;
+}
+
+/* ---------------------------------------------------------------- features */
+
+/**
+ * A saved dashboard panel, as sent to the server.
+ *
+ * Note what is NOT here: rows. A panel stores the query and the chart spec, and
+ * the server re-runs the query every time the dashboard is opened. Sending rows
+ * would freeze the figure at the moment it was saved — and would replay data
+ * fetched under one person's branch scope to whoever opened it next.
+ */
+export interface NewPanel {
+  title: string;
+  sql: string;
+  chartSpec?: ChartSpec | null;
+  caveats?: string[];
+}
+
+export interface DashboardSummary {
+  id: string;
+  title: string;
+  description: string | null;
+  userId: string;
+  role: string;
+  panels: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One panel's result, produced by the server at the moment of the request. */
+export interface DashboardPanelResult {
+  id: string;
+  title: string;
+  sql: string;
+  chartSpec: ChartSpec | null;
+  caveats: string[];
+  status: 'ok' | 'blocked' | 'error';
+  reason?: string;
+  rows: Record<string, any>[];
+  rowCount: number;
+  truncated: boolean;
+  durationMs: number;
+}
+
+export interface DashboardRun {
+  id: string;
+  title: string;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  sourceConversationId: string | null;
+  /** Server-stamped, so "as of" is when the data was fetched. */
+  refreshedAt: string;
+  panels: DashboardPanelResult[];
+}
+
+/** A dashboard's stored definition — the queries, not their results. */
+export interface DashboardDefinition {
+  id: string;
+  title: string;
+  description: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  sourceConversationId: string | null;
+  panels: {
+    id: string;
+    position: number;
+    title: string;
+    sql: string;
+    chartSpec: ChartSpec | null;
+    caveats: string[];
+  }[];
+}
+
+/** The verified principal, straight from the server. */
+export interface Me {
+  tenant_id: string;
+  user_id: string;
+  role: string;
+  all_branches: boolean;
+  branch_ids: number[];
+  branch_scope: 'ALL' | 'BRANCH';
 }

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { Conversation } from '../types';
 import { IconPlus, IconTrash } from './icons';
 
@@ -8,6 +9,9 @@ interface Props {
   onNew: () => void;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
 }
 
 /** "3m", "4h", "2d" — enough to place a thread without a date column. */
@@ -20,7 +24,30 @@ function ago(iso: string): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-export function ChatList({ chats, activeId, busy, onNew, onOpen, onDelete }: Props) {
+export function ChatList({
+  chats, activeId, busy, onNew, onOpen, onDelete, onLoadMore, hasMore, loadingMore,
+}: Props) {
+  const sentinel = useRef<HTMLDivElement>(null);
+
+  /**
+   * Load the next page when the end of the list comes into view.
+   *
+   * An IntersectionObserver rather than a scroll handler: it fires once when
+   * the sentinel appears instead of on every pixel, and it works whichever
+   * element is actually doing the scrolling. rootMargin starts the fetch a
+   * little early so the next page is usually there before the user reaches it.
+   */
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) onLoadMore(); },
+      { rootMargin: '160px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, onLoadMore, chats.length]);
+
   return (
     <nav className="chatlist" aria-label="Saved chats">
       <div className="chatlist-head">
@@ -71,6 +98,14 @@ export function ChatList({ chats, activeId, busy, onNew, onOpen, onDelete }: Pro
             </li>
           ))}
         </ul>
+      )}
+
+      {/* The trigger for the next page. Rendered only while there is one, so
+          the observer has nothing to watch once the list is exhausted. */}
+      {hasMore && (
+        <div className="chatlist-more" ref={sentinel} aria-hidden="true">
+          {loadingMore ? <span className="chatlist-spinner" /> : null}
+        </div>
       )}
     </nav>
   );

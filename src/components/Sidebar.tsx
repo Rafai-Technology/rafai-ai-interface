@@ -8,10 +8,15 @@ interface SidebarProps {
   onNewChat: () => void;
   onOpenChat: (id: string) => void;
   onDeleteChat: (id: string) => void;
+  /** Fetch the next page. Called when the end of the list scrolls into view. */
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
 }
 
 export function Sidebar({
   chats, activeChatId, busy, onNewChat, onOpenChat, onDeleteChat,
+  onLoadMore, hasMore, loadingMore,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -31,6 +36,9 @@ export function Sidebar({
         onNew={onNewChat}
         onOpen={onOpenChat}
         onDelete={onDeleteChat}
+        onLoadMore={onLoadMore}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
       />
 
       <div className="sidebar-foot">

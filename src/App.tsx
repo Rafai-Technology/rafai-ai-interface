@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import {
   ask, conversationTurns, conversations, deleteAttachment, deleteConversation, listAttachments,
   listRoles, schema, switchRole, uploadAttachment,
@@ -6,6 +7,7 @@ import {
 import { useTheme } from './theme';
 import type { Attachment, Conversation, HistoryTurn, RoleInfo, Turn } from './types';
 import { ChatPanel } from './components/ChatPanel';
+import { FeaturesPanel } from './components/FeaturesPanel';
 import { Composer } from './components/Composer';
 import { IconPanel } from './components/icons';
 import { Sidebar } from './components/Sidebar';
@@ -38,6 +40,9 @@ export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [chats, setChats] = useState<Conversation[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
+  /* One page of threads at a time, plus the cursor for the next. */
+  const [chatCursor, setChatCursor] = useState<string | null>(null);
+  const [chatsLoading, setChatsLoading] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
@@ -56,6 +61,25 @@ export default function App() {
   const [attachError, setAttachError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  /* ------------------------------------------------------------------ routing
+     The URL is the source of truth for what is on screen, so a refresh, a
+     bookmark and the back button all land where the user expects. Deriving
+     from the path rather than mirroring it into state means the two can never
+     disagree.
+
+       /              a new chat
+       /c/:id         a saved thread
+       /features      the dashboard list
+       /features/:id  one dashboard
+  */
+  const location = useLocation();
+  const navigate = useNavigate();
+  const featuresRoute = matchPath('/features/*', location.pathname)
+    ?? matchPath('/features', location.pathname);
+  const tab: 'chat' | 'features' = featuresRoute ? 'features' : 'chat';
+  const routeChatId = matchPath('/c/:id', location.pathname)?.params.id ?? null;
+  const routeDashboardId = matchPath('/features/:id', location.pathname)?.params.id ?? null;
+
   const applyRole = useCallback(async (role: string) => {
     setBusy(true);
     try {
@@ -67,14 +91,13 @@ export default function App() {
       // Switching role swaps the whole thread list with it — a manager must
       // not find the accounts conversations waiting for them, because those
       // answers hold figures this role cannot see.
-      const threads = await conversations();
-      setChats(threads);
+      const page = await conversations();
+      setChats(page.items);
+      setChatCursor(page.nextCursor);
 
-      // Always land on an empty composer. Reopening the last thread meant a
-      // refresh dropped you mid-conversation with someone else's question on
-      // screen — and in a demo the first thing anyone does is reload. Saved
-      // threads are still one click away in the sidebar.
-      setChatId(null);
+      // Switching role clears the open thread — it belonged to the other role's
+      // list. A REFRESH is different and must not land here: the URL says which
+      // thread was open and the route effect below reopens it.
       setTurns([]);
       setAttachments([]);
       setAttachError(null);
@@ -96,6 +119,54 @@ export default function App() {
       }
     })();
   }, [applyRole]);
+
+  /**
+   * Reload the first page after something changed the list.
+   *
+   * Resets the cursor with it. Keeping an old cursor after the list has
+   * reordered would page into the middle of a list that no longer exists.
+   */
+  const reloadChats = useCallback(async () => {
+    const page = await conversations();
+    setChats(page.items);
+    setChatCursor(page.nextCursor);
+  }, []);
+
+  /**
+   * The URL opened a thread — load it.
+   *
+   * This is what makes a refresh land where the user left off, and it is the
+   * ONLY place a thread gets loaded. A click navigates; this reacts. Two paths
+   * into the same state is how a click and a reload end up behaving
+   * differently.
+   */
+  useEffect(() => {
+    if (!roles.length) return;               // wait for the role to settle
+    if (routeChatId && routeChatId !== chatId) { void openChat(routeChatId); return; }
+    if (!routeChatId && chatId) { setChatId(null); setTurns([]); setAttachments([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeChatId, roles.length]);
+
+  /** Next page of threads, for the sidebar's infinite scroll. */
+  const loadMoreChats = useCallback(async () => {
+    if (!chatCursor || chatsLoading) return;
+    setChatsLoading(true);
+    try {
+      const page = await conversations({ cursor: chatCursor });
+      /* Append by id rather than blindly concatenating: a thread bumped to the
+         top while the user was scrolling would otherwise appear twice. */
+      setChats((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...page.items.filter((c) => !seen.has(c.id))];
+      });
+      setChatCursor(page.nextCursor);
+    } catch {
+      /* A failed page is not worth an error banner over the whole app; the
+         sentinel stays put and the next scroll retries. */
+    } finally {
+      setChatsLoading(false);
+    }
+  }, [chatCursor, chatsLoading]);
 
   const submit = useCallback(
     async (question: string) => {
@@ -128,8 +199,11 @@ export default function App() {
         // next question in this chat joins the same one.
         if (result.conversation_id && result.conversation_id !== chatId) {
           setChatId(result.conversation_id);
+          /* replace, not push: the empty composer at "/" is not a place the
+             back button should return to mid-conversation. */
+          navigate(`/c/${result.conversation_id}`, { replace: true });
         }
-        setChats(await conversations());
+        await reloadChats();
       } catch (e: any) {
         setTurns((t) =>
           t.map((turn) =>
@@ -163,18 +237,24 @@ export default function App() {
         setAttachError(e.message ?? 'Could not remove that file.');
       }
     },
-    [chatId],
+    [chatId, navigate, reloadChats],
   );
 
   /** A new chat is simply no thread yet — the first question creates one. */
   const newChat = useCallback(() => {
+    navigate('/');
     setChatId(null);
     setTurns([]);
     setAttachments([]);
     setAttachError(null);
     inputRef.current?.focus();
-  }, []);
+  }, [navigate]);
 
+  /**
+   * Loads a thread. Called by the route effect below, not by the click —
+   * clicking navigates, and the URL change is what opens it. One path in means
+   * a click and a refresh behave identically.
+   */
   const openChat = useCallback(
     async (id: string) => {
       setBusy(true);
@@ -227,23 +307,23 @@ export default function App() {
       }
       if (effectiveId !== chatId) setChatId(effectiveId);
       setAttachBusy(false);
-      if (!failed) setChats(await conversations());
+      if (!failed) await reloadChats();
     },
-    [chatId],
+    [chatId, navigate, reloadChats],
   );
 
   const removeChat = useCallback(
     async (id: string) => {
       await deleteConversation(id);
-      const remaining = await conversations();
-      setChats(remaining);
+      await reloadChats();
       // Only disturb the open thread if it is the one that just went.
       if (id === chatId) {
         setChatId(null);
         setTurns([]);
+        navigate('/');
       }
     },
-    [chatId],
+    [chatId, navigate, reloadChats],
   );
 
 
@@ -268,7 +348,10 @@ export default function App() {
            starting a new one has to dismiss it — otherwise the user taps and
            appears to land nowhere. */
         onNewChat={() => { newChat(); if (window.innerWidth <= 860) setRailOpen(false); }}
-        onOpenChat={(id) => { openChat(id); if (window.innerWidth <= 860) setRailOpen(false); }}
+        onOpenChat={(id) => { navigate(`/c/${id}`); if (window.innerWidth <= 860) setRailOpen(false); }}
+        onLoadMore={loadMoreChats}
+        hasMore={Boolean(chatCursor)}
+        loadingMore={chatsLoading}
         onDeleteChat={removeChat}
       />
 
@@ -313,9 +396,38 @@ export default function App() {
 
         {fatal && <div className="fatal" role="alert">{fatal}</div>}
 
+        <div className="tabs" role="tablist" aria-label="Workspace">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'chat'}
+            className={tab === 'chat' ? 'tab is-on' : 'tab'}
+            onClick={() => navigate(chatId ? `/c/${chatId}` : '/')}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'features'}
+            className={tab === 'features' ? 'tab is-on' : 'tab'}
+            onClick={() => navigate('/features')}
+          >
+            Features
+          </button>
+        </div>
+
         <div className="scroll">
 
-          {turns.length === 0 ? (
+          {tab === 'features' ? (
+            <FeaturesPanel
+              mode={mode}
+              role={active}
+              openId={routeDashboardId}
+              onOpen={(id) => navigate(`/features/${id}`)}
+              onBack={() => navigate('/features')}
+            />
+          ) : turns.length === 0 ? (
             /* Nothing asked yet: the input is the page, not a strip pinned to
                the bottom edge. It docks down once a conversation starts. */
             <div className="hero">
@@ -348,11 +460,16 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <ChatPanel turns={turns} mode={mode} />
+            <ChatPanel
+              turns={turns}
+              mode={mode}
+              conversationId={chatId}
+              onFeatureCreated={(id) => navigate(`/features/${id}`)}
+            />
           )}
         </div>
 
-        {turns.length > 0 && (
+        {tab === 'chat' && turns.length > 0 && (
           <div className="dock">
             <Composer
               ref={inputRef}
