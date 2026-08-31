@@ -192,6 +192,23 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   border: 1px solid color-mix(in srgb, var(--critical) 30%, transparent);
 }
 
+/* Recoverable, unlike .fatal — the app still works, so this reads as
+   information rather than failure and can be dismissed. */
+.notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 12px 22px 0; padding: 10px 14px; border-radius: 10px;
+  font-size: 13.5px; line-height: 1.45;
+  color: var(--ink); background: var(--surface-2, color-mix(in srgb, var(--ink) 4%, var(--surface)));
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.notice span { flex: 1; }
+.notice button {
+  flex: none; border: 0; background: none; cursor: pointer;
+  font-size: 17px; line-height: 1; padding: 0 2px;
+  color: var(--muted, currentColor); opacity: 0.65;
+}
+.notice button:hover { opacity: 1; }
+
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 22px 8px; }
 
 @keyframes shimmer { 0% { opacity: 0.35; } 50% { opacity: 0.9; } 100% { opacity: 0.35; } }

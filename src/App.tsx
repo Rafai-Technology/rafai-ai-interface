@@ -46,6 +46,8 @@ export default function App() {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
+  /** Recoverable, dismissible message. Unlike `fatal`, the app stays usable. */
+  const [notice, setNotice] = useState<string | null>(null);
   /**
    * Open on a desktop, closed on a phone. On mobile the sidebar is a
    * slide-over drawer covering most of the screen, so defaulting it open
@@ -267,13 +269,40 @@ export default function App() {
         setTurns(turnList.map(toTurn(active)));
         setAttachments(attachmentList);
         setAttachError(null);
-      } catch (e: any) {
-        setFatal(e.message ?? 'Could not open that chat.');
+        setNotice(null);
+      } catch {
+        /**
+         * A chat that will not open is a dead end, not a fatal error.
+         *
+         * The backend answers 404 for any thread this (tenant, user, role)
+         * does not own, and in the demo the identity is DERIVED from the role
+         * -- `demo.${role}` -- so every role keeps its own history. Open a URL
+         * for a thread you started under a different role and it is, correctly,
+         * not yours.
+         *
+         * It used to setFatal() the server's text, which left "No such
+         * conversation" on screen over an empty pane with nothing to click.
+         * The thread is unreachable; the app is not.
+         *
+         * The wording is deliberately the same whether the id exists or not.
+         * The 404 is what stops one role confirming another role's thread
+         * exists, and a message that said "belongs to ADMIN" would hand back
+         * exactly what the status code is there to withhold.
+         */
+        setTurns([]);
+        setAttachments([]);
+        setChatId(null);
+        setNotice(
+          'That chat is not available for the current role. Chats are kept ' +
+            'separately per role — if you started it under another one, switch ' +
+            'roles and open it from the list.',
+        );
+        navigate('/', { replace: true });
       } finally {
         setBusy(false);
       }
     },
-    [active],
+    [active, navigate],
   );
 
   /**
@@ -395,6 +424,12 @@ export default function App() {
         </header>
 
         {fatal && <div className="fatal" role="alert">{fatal}</div>}
+        {notice && (
+          <div className="notice" role="status">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
+          </div>
+        )}
 
         <div className="tabs" role="tablist" aria-label="Workspace">
           <button
