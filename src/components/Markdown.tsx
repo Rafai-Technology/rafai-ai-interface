@@ -162,6 +162,32 @@ export function Markdown({ text }: { text: string }) {
       continue;
     }
 
+    /**
+     * A blockquote is the finding, not a quotation.
+     *
+     * The agent is told to put the observation it volunteers -- the thing the
+     * user did not ask for but would act on -- in a blockquote. Rendered as a
+     * plain paragraph it read exactly like the surrounding prose, so the one
+     * sentence that changes what a number MEANS ("that is a backlog, not
+     * normal transit") was the easiest thing on screen to skim past.
+     *
+     * Consecutive `>` lines fold into one callout, so a two-sentence finding
+     * does not become two boxes.
+     */
+    if (/^\s*>\s?/.test(line)) {
+      const quoted: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        quoted.push(lines[i].replace(/^\s*>\s?/, ''));
+        i++;
+      }
+      blocks.push(
+        <aside key={key++} className="md-note">
+          {inline(quoted.join(' ').trim(), `q${key}`)}
+        </aside>,
+      );
+      continue;
+    }
+
     const bulleted = /^\s*[-*•]\s+/;
     const numbered = /^\s*\d+[.)]\s+/;
 

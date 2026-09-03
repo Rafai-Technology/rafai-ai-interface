@@ -65,6 +65,9 @@ export async function switchRole(role: string, branchIds?: number[]): Promise<vo
 export async function ask(
   question: string,
   conversationId: string | null,
+  /** Replace this stored turn and everything after it, instead of appending —
+   *  used when a question is edited, or re-run for a different answer. */
+  replaceTurnId?: string | null,
 ): Promise<AskResult> {
   const res = await fetch(url('/agent/ask'), {
     method: 'POST',
@@ -72,7 +75,11 @@ export async function ask(
       'content-type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ question, conversation_id: conversationId }),
+    body: JSON.stringify({
+      question,
+      conversation_id: conversationId,
+      ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
+    }),
   });
   return json<AskResult>(res);
 }
@@ -116,6 +123,15 @@ export async function conversationTurns(id: string): Promise<HistoryTurn[]> {
     headers: { Authorization: `Bearer ${token}` },
   });
   return json<HistoryTurn[]>(res);
+}
+
+export async function setPinned(id: string, pinned: boolean): Promise<void> {
+  const res = await fetch(url(`/agent/conversations/${id}`), {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  });
+  await json<{ pinned: boolean }>(res);
 }
 
 export async function deleteConversation(id: string): Promise<void> {

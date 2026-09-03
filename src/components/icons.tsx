@@ -46,6 +46,32 @@ export const IconPlus = () => (
   <svg {...base} width={13} height={13}><path d="M12 5v14M5 12h14" /></svg>
 );
 
+/* Outline when unpinned, filled when pinned — the state is the shape, not just
+   a colour, so it survives a greyscale screenshot and a colour-blind reader. */
+export const IconPin = ({ filled = false }: { filled?: boolean }) => (
+  <svg {...base} width={13} height={13} fill={filled ? 'currentColor' : 'none'}>
+    <path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z" />
+    <path d="M12 13v7" />
+  </svg>
+);
+
+export const IconCopy = () => (
+  <svg {...base} width={13} height={13}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
+);
+
+export const IconCheck = () => (
+  <svg {...base} width={13} height={13}><path d="M5 12.5 10 17.5 19 7" /></svg>
+);
+
+export const IconEdit = () => (
+  <svg {...base} width={13} height={13}><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4Z" /><path d="M13.5 6.5 17.5 10.5" /></svg>
+);
+
+/* An arrow returning on itself: re-ask, not undo. */
+export const IconRerun = () => (
+  <svg {...base} width={13} height={13}><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
+);
+
 export const IconTrash = () => (
   <svg {...base} width={13} height={13}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
 );

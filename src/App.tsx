@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ask, conversationTurns, conversations, deleteAttachment, deleteConversation, listAttachments,
+  ask, conversationTurns, conversations, deleteAttachment, deleteConversation, listAttachments, setPinned,
   listRoles, schema, switchRole, uploadAttachment,
 } from './api';
 import { useTheme } from './theme';
@@ -27,6 +27,9 @@ const FALLBACK_QUESTIONS = [
 /** A stored turn rendered exactly as it first appeared, chart and SQL included. */
 const toTurn = (role: string) => (h: HistoryTurn): Turn => ({
   id: `h-${h.id}`,
+  /* The server's id, kept alongside the local render key: editing and
+     re-running address the STORED turn, which `h-123` is not. */
+  turnId: String(h.id),
   question: h.question,
   role,
   pending: false,
@@ -82,12 +85,27 @@ export default function App() {
   const routeChatId = matchPath('/c/:id', location.pathname)?.params.id ?? null;
   const routeDashboardId = matchPath('/features/:id', location.pathname)?.params.id ?? null;
 
-  const applyRole = useCallback(async (role: string) => {
+  /**
+   * The current path, readable from a stable callback.
+   *
+   * applyRole needs to know whether a thread is open, but closing over
+   * location.pathname would change its identity on every navigation -- and the
+   * mount effect below depends on applyRole, so it would re-run listRoles and
+   * re-mint a token every time the URL changed.
+   */
+  const pathRef = useRef(location.pathname);
+  pathRef.current = location.pathname;
+  /* navigate is not referentially stable across location changes either, and it
+     lands in the same dependency chain -- measured: two navigations produced two
+     extra /auth/roles calls, i.e. the whole mount effect re-running. */
+  const navRef = useRef(navigate);
+  navRef.current = navigate;
+
+  const applyRole = useCallback(async (role: string, initial = false) => {
     setBusy(true);
     try {
       await switchRole(role);
       setActive(role);
-      await schema(); // verifies the role switch landed; result is not displayed
       setFatal(null);
 
       // Switching role swaps the whole thread list with it — a manager must
@@ -97,12 +115,52 @@ export default function App() {
       setChats(page.items);
       setChatCursor(page.nextCursor);
 
-      // Switching role clears the open thread — it belonged to the other role's
-      // list. A REFRESH is different and must not land here: the URL says which
-      // thread was open and the route effect below reopens it.
-      setTurns([]);
-      setAttachments([]);
-      setAttachError(null);
+      /**
+       * The schema probe runs AFTER the composer is free, and is not awaited.
+       *
+       * It was awaited here, between the token and the chat list, purely to
+       * confirm the role switch had landed -- and its own comment said the
+       * result was never displayed. Measured on webtrans_CTS_AI it takes 13.9
+       * seconds on the first call of a session, because that call is what
+       * builds the catalogue. So the composer sat disabled for fourteen seconds
+       * waiting on an answer nobody reads, which is the whole of "why does the
+       * chat take so long to become usable".
+       *
+       * Firing it without awaiting keeps both things it was worth having: the
+       * catalogue is warm by the time the first question is asked, and a role
+       * switch that genuinely failed still surfaces -- just after the user can
+       * type rather than before. Warm, it returns in 3 ms, so this costs
+       * nothing on every later switch.
+       */
+      void schema().catch((e: any) =>
+        setFatal(e?.message ?? 'Could not load the schema for this role.'),
+      );
+
+      /**
+       * Switching role clears the open thread — it belonged to the other role's
+       * list, and its answers can hold figures this role cannot see.
+       *
+       * A first load must NOT clear anything, which is why `initial` exists.
+       * The route effect below is gated on roles.length, so publishing the role
+       * list is what lets a refresh reopen the thread named in the URL. When
+       * mount published that list BEFORE awaiting applyRole, the two ran
+       * concurrently: openChat loaded /c/:id while applyRole was still working,
+       * and then applyRole finished and wiped it. Whichever settled last won,
+       * so the thread appeared or did not appear at random — the sidebar row
+       * highlighted, the pane empty.
+       *
+       * Mount now publishes the roles only after this resolves, and skips the
+       * clear entirely.
+       */
+      if (!initial) {
+        setTurns([]);
+        setAttachments([]);
+        setAttachError(null);
+        /* The URL named a thread belonging to the role we just left. Leaving it
+           in the address bar would show an empty pane under a live /c/:id, and
+           a refresh would then ask for a thread this role cannot open. */
+        if (matchPath('/c/:id', pathRef.current)) navRef.current('/', { replace: true });
+      }
     } catch (e: any) {
       setFatal(e.message ?? 'Could not reach the agent service.');
     } finally {
@@ -114,8 +172,10 @@ export default function App() {
     (async () => {
       try {
         const list = await listRoles();
+        /* Role first, list second. setRoles opens the route effect's gate, and
+           opening it before applyRole has settled is what let the two race. */
+        await applyRole(list[0]?.role ?? 'OPERATION_EXECUTIVE', true);
         setRoles(list);
-        await applyRole(list[0]?.role ?? 'OPERATION_EXECUTIVE');
       } catch (e: any) {
         setFatal(`${e.message ?? e}. Is the agent service running on :3000?`);
       }
@@ -149,6 +209,30 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeChatId, roles.length]);
 
+  /**
+   * Pin or unpin, optimistically.
+   *
+   * The row is moved in local state before the request resolves, because the
+   * whole point of the control is that the list reorders under your cursor. On
+   * failure the previous list is restored — a pin that silently did not stick
+   * is worse than one that visibly bounced back.
+   */
+  const togglePin = useCallback(async (id: string, pinned: boolean) => {
+    const before = chats;
+    setChats((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, pinned } : c));
+      const rank = (c: typeof next[number]) => (c.pinned ? 0 : 1);
+      return [...next].sort(
+        (a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt),
+      );
+    });
+    try {
+      await setPinned(id, pinned);
+    } catch {
+      setChats(before);
+    }
+  }, [chats]);
+
   /** Next page of threads, for the sidebar's infinite scroll. */
   const loadMoreChats = useCallback(async () => {
     if (!chatCursor || chatsLoading) return;
@@ -170,8 +254,17 @@ export default function App() {
     }
   }, [chatCursor, chatsLoading]);
 
+  /**
+   * Send a question.
+   *
+   * `replace` names a stored turn to overwrite: the edit and re-run controls
+   * both pass one, and the server drops that turn and everything after it
+   * before answering. The bubbles after it are removed locally at the same
+   * moment, so the screen never shows an answer to a question that has just
+   * been withdrawn.
+   */
   const submit = useCallback(
-    async (question: string) => {
+    async (question: string, replace?: { turnId: string; localId: string }) => {
       const q = question.trim();
       if (!q || busy) return;
 
@@ -182,19 +275,30 @@ export default function App() {
          still prints "In context for this answer". Clearing the composer tidies
          the input without hiding that fact. */
       const sent = attachments;
-      setTurns((t) => [
-        ...t,
-        { id, question: q, role: active, pending: true, sentAttachments: sent.length ? sent : undefined },
-      ]);
+      setTurns((t) => {
+        /* Everything from the replaced turn onward goes now, not when the
+           answer lands: leaving it up would show the old exchange and the new
+           one side by side, which reads as two questions rather than one
+           correction. */
+        const kept = replace ? t.slice(0, t.findIndex((x) => x.id === replace.localId)) : t;
+        return [
+          ...kept,
+          { id, question: q, role: active, pending: true, sentAttachments: sent.length ? sent : undefined },
+        ];
+      });
       setDraft('');
       setAttachments([]);
       setAttachError(null);
       setBusy(true);
 
       try {
-        const result = await ask(q, chatId);
+        const result = await ask(q, chatId, replace?.turnId);
         setTurns((t) =>
-          t.map((turn) => (turn.id === id ? { ...turn, result, pending: false } : turn)),
+          t.map((turn) =>
+            turn.id === id
+              ? { ...turn, result, pending: false, turnId: result.turn_id ?? null }
+              : turn,
+          ),
         );
 
         // A first message creates the thread server-side; adopt its id so the
@@ -261,11 +365,26 @@ export default function App() {
     async (id: string) => {
       setBusy(true);
       try {
-        setChatId(id);
         const [turnList, attachmentList] = await Promise.all([
           conversationTurns(id),
           listAttachments(id),
         ]);
+        /**
+         * chatId is set AFTER the load, not before it.
+         *
+         * Set first, it means "opening"; the effect above guards on
+         * `routeChatId !== chatId` and so reads a thread that is still fetching
+         * as one already open. If that pass is then discarded -- StrictMode
+         * double-invokes effects in development, and a slow network does the
+         * same thing in production -- nothing retries, and the thread sits
+         * highlighted in the sidebar above an empty pane. Reproduced exactly
+         * that way on /c/107.
+         *
+         * Set last, chatId means "loaded", the guard is honest, and a discarded
+         * attempt is simply retried. The cost is that the sidebar highlight
+         * lands a moment later, which is the correct trade.
+         */
+        setChatId(id);
         setTurns(turnList.map(toTurn(active)));
         setAttachments(attachmentList);
         setAttachError(null);
@@ -381,6 +500,7 @@ export default function App() {
         onLoadMore={loadMoreChats}
         hasMore={Boolean(chatCursor)}
         loadingMore={chatsLoading}
+        onTogglePin={togglePin}
         onDeleteChat={removeChat}
       />
 
@@ -500,6 +620,8 @@ export default function App() {
               mode={mode}
               conversationId={chatId}
               onFeatureCreated={(id) => navigate(`/features/${id}`)}
+              onResubmit={(q, replace) => void submit(q, replace)}
+              busy={busy}
             />
           )}
         </div>

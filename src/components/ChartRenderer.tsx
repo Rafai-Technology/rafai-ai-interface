@@ -41,11 +41,32 @@ const PERCENTAGE_COLUMN = /(^|_)(pct|percent|percentage|rate|ratio|share)(_|$)/i
 /** Past six slices a pie stops being readable at a glance. */
 const MAX_PIE_SEGMENTS = 6;
 
-/** Beyond this many bars, rotated labels start overlapping regardless of how
- *  wide the card is — the fix is more actual pixels, not a tighter squeeze. */
-const SCROLL_BAR_COUNT = 15;
-/** Wide enough that a -30° label clears its neighbour at this bar's width. */
-const MIN_BAR_PX = 46;
+/** Column names whose values form a sequence, so a line between them is real. */
+const TEMPORAL_KEY = /month|date|period|day|week|year|quarter|hour|time/i;
+/** A value that is itself a date, whatever the column happens to be called. */
+const LOOKS_TEMPORAL = (v: any) =>
+  typeof v === 'string' && /^\d{4}-\d{2}(-\d{2})?/.test(v.trim());
+/** Below this a categorical line is still legible, and some readers prefer it
+ *  for a small ranked set. Above it there is no defence for the form. */
+const LINE_CATEGORY_LIMIT = 12;
+
+/**
+ * Beyond this many bars the chart is PAGED, not squeezed and not scrolled.
+ *
+ * It used to force a min-width per bar and let the card scroll sideways. Two
+ * things went wrong with that. The rotated category labels are drawn beyond
+ * the plot's right edge, so the last one -- RAJKOT FCS, on an 18-branch
+ * breakdown -- was clipped by the card rather than reachable by scrolling. And
+ * a horizontal scrollbar inside a vertically scrolling answer is a poor
+ * target: the wheel scrolls the page, and the bar itself is a few pixels tall.
+ *
+ * Paging keeps every bar at a legible width, keeps the labels inside the card,
+ * and makes moving through the data an explicit control rather than a gesture
+ * somebody has to discover.
+ */
+const BARS_PER_PAGE = 12;
+/** On a phone twelve bars is about 24px each, which is a stripe, not a bar. */
+const BARS_PER_PAGE_NARROW = 6;
 
 // Marks are drawn at full size immediately: an entry animation adds nothing to
 // an answer the reader is already waiting on, and it makes what is on screen at
@@ -212,7 +233,6 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
             />
           </div>
         </div>
-        {card}
         <div key={showTable ? 'table' : 'chart'} className="chart-swap" ref={chartWrapRef}>
           {showTable ? (
             <DataTable data={data} x={spec.x} series={forecastSeries} />
@@ -220,6 +240,7 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
             <Forecast data={data} x={spec.x} mode={mode} />
           )}
         </div>
+        {card}
       </figure>
     );
   }
@@ -270,9 +291,31 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
   // "more charts" is this, not more queries: the data already retrieved can
   // stand more than one representation, and re-plotting it costs nothing.
   const canPie = !split && series.length === 1 && data.length <= MAX_PIE_SEGMENTS;
+
+  /**
+   * Line is offered only when the x-axis is a SEQUENCE.
+   *
+   * A line says the space between two points is continuous and that the slope
+   * between them means something. Between "BHOSARI CB" and "DELHI CB" it means
+   * nothing -- the order is whatever the ORDER BY happened to be, and re-sorting
+   * the query redraws the "trend". On a 70-branch breakdown the result was a
+   * flat line with one spike at the end and a solid band of overlapping labels
+   * underneath: unreadable, and describing a relationship that does not exist.
+   *
+   * Bar and pie both encode magnitude per category without implying anything
+   * between categories, so they stay. Time keeps its line.
+   */
+  const temporalAxis = TEMPORAL_KEY.test(spec.x)
+    || data.every((r) => LOOKS_TEMPORAL(r[spec.x]));
+  const canLine = !split && (temporalAxis || data.length <= LINE_CATEGORY_LIMIT);
+
   const availableTypes: ChartSpec['type'][] = split
     ? [coercedType]
-    : (['bar', 'line', ...(canPie ? (['pie'] as const) : [])] as ChartSpec['type'][]);
+    : ([
+        'bar',
+        ...(canLine ? (['line'] as const) : []),
+        ...(canPie ? (['pie'] as const) : []),
+      ] as ChartSpec['type'][]);
 
   return (
     <ChartWithTypeSwitch
@@ -367,8 +410,6 @@ function ChartWithTypeSwitch({
           />
         </div>
       </div>
-      {card}
-
       <div key={showTable ? 'table' : 'chart'} className="chart-swap" ref={chartWrapRef}>
       {showTable ? (
         <DataTable data={data} x={spec.x} series={series} />
@@ -401,6 +442,11 @@ function ChartWithTypeSwitch({
         />
       )}
       </div>
+      {/* Below the plot, not above it. Sitting between the header and the
+          chart the card overlapped the plot area and read as part of the
+          chart; a produced file is an outcome of the answer, so it belongs
+          after the thing it was produced from. */}
+      {card}
     </figure>
   );
 }
@@ -642,6 +688,22 @@ function Plot({
   const plotHeight = narrow ? Math.min(height, 208) : height;
   const yAxisWidth = narrow ? 38 : 52;
 
+  /* Paging is bar-only: a line chart reads fine with many points, and cutting
+     a time series into pages would hide the shape that is the whole point. */
+  const perPage = narrow ? BARS_PER_PAGE_NARROW : BARS_PER_PAGE;
+  const paged = type === 'bar' && data.length > perPage;
+  const [page, setPage] = useState(0);
+  const pageCount = paged ? Math.ceil(data.length / perPage) : 1;
+  /* Clamped rather than reset: when a filter shrinks the data under the
+     current page the view must land on the last real page, not on an empty
+     one. */
+  const safePage = Math.min(page, pageCount - 1);
+  const view = useMemo(
+    () => (paged ? data.slice(safePage * perPage, (safePage + 1) * perPage) : data),
+    [data, paged, safePage, perPage],
+  );
+
+
   const tooltipStyle = {
     background: p.surface,
     border: `1px solid ${p.grid}`,
@@ -659,7 +721,6 @@ function Plot({
   // Past this many bars, squeezing everything into the card's fixed width
   // makes every label overlap its neighbours no matter how they're rotated —
   // give each bar a real minimum width instead and let the card scroll.
-  const manyBars = type === 'bar' && data.length > SCROLL_BAR_COUNT;
 
   /**
    * How the category labels are laid out, decided from the measured card and
@@ -672,14 +733,12 @@ function Plot({
    * information and a rotated one is not.
    */
   const layout = useMemo(() => {
-    const labels = data.map((r) => fmt.short(r[x]));
+    const labels = view.map((r) => fmt.short(r[x]));
     const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
     const flatPx = longest * CHAR_PX + 12;
-    // When the card scrolls, the drawing surface is the min-width we force,
-    // not the visible card — each bar is guaranteed MIN_BAR_PX of it.
-    const plotPx = manyBars
-      ? data.length * MIN_BAR_PX
-      : Math.max(0, measured - yAxisWidth - 20);
+    // The window always fits the card, so the drawing surface is simply the
+    // card minus its gutters — no forced min-width to reason about any more.
+    const plotPx = Math.max(0, measured - yAxisWidth - 20);
 
     if (plotPx <= 0) {
       // Pre-measurement: assume rotation rather than flat, so the first paint
@@ -694,7 +753,7 @@ function Plot({
       ? 0
       : Math.max(0, Math.ceil(data.length / Math.max(1, rotatedFit)) - 1);
     return { angle: -35, interval, height: Math.min(84, 24 + longest * 4.4) };
-  }, [data, x, fmt, measured, manyBars, yAxisWidth]);
+  }, [view, x, fmt, measured, yAxisWidth]);
 
   const categoryAxis = {
     dataKey: x,
@@ -766,7 +825,7 @@ function Plot({
           </Pie>
         </PieChart>
       ) : (
-        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
+        <BarChart data={view} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
           <CartesianGrid stroke={p.grid} strokeWidth={1} vertical={false} />
           <XAxis {...categoryAxis} />
           <YAxis {...axisProps} tickFormatter={compact} width={yAxisWidth} />
@@ -790,16 +849,37 @@ function Plot({
     </ResponsiveContainer>
   );
 
-  if (!manyBars) return <div ref={wrapRef}>{plot}</div>;
+  if (!paged) return <div ref={wrapRef}>{plot}</div>;
 
-  // The inner div's min-width is a floor, not a fixed size: it fills the
-  // card as normal up to that many bars' worth of room, and only forces the
-  // outer div into horizontal scroll once there are more bars than the card
-  // can show at a legible width.
+  const from = safePage * perPage + 1;
+  const to = Math.min((safePage + 1) * perPage, data.length);
+
   return (
-    <div className="chart-scroll" ref={wrapRef}>
-      <div style={{ minWidth: data.length * MIN_BAR_PX, height: plotHeight }}>
-        {plot}
+    <div ref={wrapRef}>
+      {plot}
+      {/* The control says which slice of the data is on screen, not just which
+          page number — "13–18 of 18" is checkable against the table; "2 / 2"
+          is not. */}
+      <div className="chart-pager">
+        <button
+          type="button"
+          onClick={() => setPage(safePage - 1)}
+          disabled={safePage === 0}
+          aria-label="Previous bars"
+        >
+          ‹
+        </button>
+        <span className="chart-pager-range">
+          {from}–{to} <span className="chart-pager-of">of {data.length}</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setPage(safePage + 1)}
+          disabled={safePage >= pageCount - 1}
+          aria-label="Next bars"
+        >
+          ›
+        </button>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Conversation } from '../types';
-import { IconPlus, IconTrash } from './icons';
+import { IconPin, IconPlus, IconTrash } from './icons';
 
 interface Props {
   chats: Conversation[];
@@ -9,6 +9,7 @@ interface Props {
   onNew: () => void;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onLoadMore: () => void;
   hasMore: boolean;
   loadingMore: boolean;
@@ -25,9 +26,32 @@ function ago(iso: string): string {
 }
 
 export function ChatList({
-  chats, activeId, busy, onNew, onOpen, onDelete, onLoadMore, hasMore, loadingMore,
+  chats, activeId, busy, onNew, onOpen, onDelete, onTogglePin, onLoadMore, hasMore, loadingMore,
 }: Props) {
   const sentinel = useRef<HTMLDivElement>(null);
+
+  /**
+   * One flat list with headings, not two lists.
+   *
+   * The server returns pinned rows first, so the split is a scan rather than a
+   * sort — and keeping them in a single <ul> means the paging sentinel at the
+   * bottom still sees the whole scroll container. Headings only appear when
+   * there is actually a pinned row to separate; an unused "Recent" label above
+   * a list with nothing above it is noise.
+   */
+  const items = (() => {
+    const pinned = chats.filter((c) => c.pinned);
+    const rest = chats.filter((c) => !c.pinned);
+    if (!pinned.length) return rest.map((chat) => ({ kind: 'chat' as const, chat }));
+    return [
+      { kind: 'heading' as const, key: 'h-pinned', label: 'Pinned' },
+      ...pinned.map((chat) => ({ kind: 'chat' as const, chat })),
+      ...(rest.length
+        ? [{ kind: 'heading' as const, key: 'h-recent', label: 'Recent' }]
+        : []),
+      ...rest.map((chat) => ({ kind: 'chat' as const, chat })),
+    ];
+  })();
 
   /**
    * Load the next page when the end of the list comes into view.
@@ -70,33 +94,60 @@ export function ChatList({
         </p>
       ) : (
         <ul className="chatlist-items">
-          {chats.map((c) => (
-            <li key={c.id} className={`chatitem${c.id === activeId ? ' active' : ''}`}>
-              <button
-                type="button"
-                className="chatitem-open"
-                onClick={() => onOpen(c.id)}
-                disabled={busy}
-                title={c.title}
-                aria-current={c.id === activeId || undefined}
+          {items.map((entry) =>
+            entry.kind === 'heading' ? (
+              /* A heading rather than two lists: the pinned rows sit in the
+                 same scroll container as the rest, so the sentinel at the
+                 bottom still governs paging and nothing has to know that the
+                 top of the list came from a different query. */
+              <li key={entry.key} className="chatlist-section" aria-hidden="true">
+                {entry.label}
+              </li>
+            ) : (
+              <li
+                key={entry.chat.id}
+                className={`chatitem${entry.chat.id === activeId ? ' active' : ''}${
+                  entry.chat.pinned ? ' pinned' : ''
+                }`}
               >
-                <span className="chatitem-title">{c.title}</span>
-                <span className="chatitem-meta">
-                  {c.turns} {c.turns === 1 ? 'msg' : 'msgs'} · {ago(c.updatedAt)}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="chatitem-del"
-                onClick={() => onDelete(c.id)}
-                disabled={busy}
-                aria-label={`Delete chat: ${c.title}`}
-                title="Delete this chat"
-              >
-                <IconTrash />
-              </button>
-            </li>
-          ))}
+                <button
+                  type="button"
+                  className="chatitem-open"
+                  onClick={() => onOpen(entry.chat.id)}
+                  disabled={busy}
+                  title={entry.chat.title}
+                  aria-current={entry.chat.id === activeId || undefined}
+                >
+                  <span className="chatitem-title">{entry.chat.title}</span>
+                  <span className="chatitem-meta">
+                    {entry.chat.turns} {entry.chat.turns === 1 ? 'msg' : 'msgs'} ·{' '}
+                    {ago(entry.chat.updatedAt)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`chatitem-pin${entry.chat.pinned ? ' on' : ''}`}
+                  onClick={() => onTogglePin(entry.chat.id, !entry.chat.pinned)}
+                  disabled={busy}
+                  aria-pressed={Boolean(entry.chat.pinned)}
+                  aria-label={`${entry.chat.pinned ? 'Unpin' : 'Pin'} chat: ${entry.chat.title}`}
+                  title={entry.chat.pinned ? 'Unpin this chat' : 'Pin this chat'}
+                >
+                  <IconPin filled={Boolean(entry.chat.pinned)} />
+                </button>
+                <button
+                  type="button"
+                  className="chatitem-del"
+                  onClick={() => onDelete(entry.chat.id)}
+                  disabled={busy}
+                  aria-label={`Delete chat: ${entry.chat.title}`}
+                  title="Delete this chat"
+                >
+                  <IconTrash />
+                </button>
+              </li>
+            ),
+          )}
         </ul>
       )}
 

@@ -4,7 +4,11 @@ import { IconDownload, IconFile } from './icons';
 
 type Format = 'csv' | 'pdf' | 'png';
 
-const FORMAT_LABEL: Record<Format, string> = { csv: 'CSV', pdf: 'PDF', png: 'PNG image' };
+const FORMAT_LABEL: Record<Format, string> = {
+  csv: 'Spreadsheet · CSV',
+  pdf: 'Report · PDF',
+  png: 'Image · PNG',
+};
 
 interface Props {
   format: Format;
@@ -21,7 +25,14 @@ interface Props {
  */
 export function ExportFileCard({ format, title, onDownload }: Props) {
   const [state, setState] = useState<'idle' | 'working' | 'error'>('idle');
-  const filename = `${slug(title)}.${format}`;
+  /**
+   * Stem and extension are separate elements so the ellipsis can only ever eat
+   * the stem. Truncating the whole string produced
+   * "delivered-consignments-report-fy-20…", which hides the one part of a
+   * filename that says what the thing IS.
+   */
+  const stem = slug(title);
+  const filename = `${stem}.${format}`;
 
   const handleClick = async () => {
     if (state === 'working') return;
@@ -45,8 +56,11 @@ export function ExportFileCard({ format, title, onDownload }: Props) {
         <IconFile />
       </span>
       <span className="export-card-body">
-        <span className="export-card-name">{filename}</span>
-        <span className="export-card-meta">
+        <span className="export-card-name" title={filename}>
+          <span className="export-card-stem">{stem}</span>
+          <span className="export-card-ext">.{format}</span>
+        </span>
+        <span className={`export-card-meta${state === 'error' ? ' error' : ''}`}>
           {state === 'working'
             ? 'Preparing…'
             : state === 'error'
@@ -54,7 +68,9 @@ export function ExportFileCard({ format, title, onDownload }: Props) {
               : FORMAT_LABEL[format]}
         </span>
       </span>
-      <span className="export-card-action" aria-hidden><IconDownload /></span>
+      <span className="export-card-action" aria-hidden>
+        {state === 'working' ? <span className="export-card-spin" /> : <IconDownload />}
+      </span>
     </button>
   );
 }

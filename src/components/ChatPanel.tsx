@@ -5,8 +5,9 @@ import { forecastChart, inferChart, parseAnswer, rowsForChart } from '../answer'
 import { exportAsPdf, exportRowsAsCsv, provenanceFrom } from '../export';
 import { ChartRenderer } from './ChartRenderer';
 import { ExportFileCard } from './ExportFileCard';
-import { IconFile } from './icons';
+import { IconCheck, IconCopy, IconEdit, IconFile, IconRerun } from './icons';
 import { Markdown } from './Markdown';
+import { InsightsPanel } from './InsightsPanel';
 import { SaveDashboardDialog, panelsFromTurn } from './SaveDashboardDialog';
 import { SqlInspector } from './SqlInspector';
 
@@ -61,6 +62,83 @@ interface Props {
   conversationId?: string | null;
   /** Called after a feature is created, so the shell can navigate to it. */
   onFeatureCreated?: (id: string) => void;
+  /** Ask again, replacing a stored turn: the edited text (or the original, for
+   *  a straight re-run) plus which exchange it supersedes. */
+  onResubmit?: (question: string, replace: { turnId: string; localId: string }) => void;
+  /** True while a question is in flight — the controls disable rather than
+   *  queueing a second ask on top of one already running. */
+  busy?: boolean;
+}
+
+/**
+ * The question, editable in place.
+ *
+ * A textarea rather than an input: these are sentences, and a single-line box
+ * that scrolls sideways hides the half of the question somebody is trying to
+ * correct. Enter submits and Shift+Enter breaks the line, matching the
+ * composer below so the two do not need separate learning.
+ */
+function QuestionEditor({
+  initial, busy, onCancel, onSubmit,
+}: {
+  initial: string;
+  busy?: boolean;
+  onCancel: () => void;
+  onSubmit: (next: string) => void;
+}) {
+  const [text, setText] = useState(initial);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // Caret at the end, not selecting everything: the usual edit is a tweak to
+    // a long question, and select-all makes the first keystroke destroy it.
+    el.setSelectionRange(el.value.length, el.value.length);
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  const unchanged = text.trim() === initial.trim();
+
+  return (
+    <div className="question-edit">
+      <textarea
+        ref={ref}
+        value={text}
+        rows={1}
+        onChange={(e) => {
+          setText(e.target.value);
+          e.target.style.height = 'auto';
+          e.target.style.height = `${e.target.scrollHeight}px`;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel();
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (text.trim() && !unchanged) onSubmit(text.trim());
+          }
+        }}
+        aria-label="Edit your question"
+      />
+      <div className="question-edit-actions">
+        <button type="button" className="ghost" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || !text.trim() || unchanged}
+          onClick={() => onSubmit(text.trim())}
+          /* Disabled when nothing changed: re-running an identical question is
+             what the re-run control is for, and doing it from here would look
+             like the edit silently failed. */
+          title={unchanged ? 'Change the question, or use "Ask again"' : 'Ask this instead'}
+        >
+          Ask again
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -155,9 +233,17 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
   );
   const exportRequest = exportStep?.exportRequest ?? null;
 
+  /* Read off the trace, not out of the prose: these are the numbers somebody
+     makes a decision on, and a figure the model retyped is a figure that can be
+     retyped wrong. */
+  const findings = turn.result.trace.find(
+    (s) => s.tool === 'diagnose_process' && s.status === 'ok' && s.findings?.length,
+  )?.findings;
+
   return (
     <>
       <Markdown text={text} />
+      {findings && findings.length > 0 && <InsightsPanel findings={findings} />}
       {chart && rows ? (
         <ChartRenderer
           spec={chart}
@@ -192,7 +278,24 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
   );
 }
 
-export function ChatPanel({ turns, mode, conversationId, onFeatureCreated }: Props) {
+export function ChatPanel({
+  turns, mode, conversationId, onFeatureCreated, onResubmit, busy,
+}: Props) {
+  const [editing, setEditing] = useState<string | null>(null);
+  /** Which question was just copied, so the button can confirm it briefly. */
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyQuestion = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      window.setTimeout(() => setCopied((c) => (c === id ? null : c)), 1400);
+    } catch {
+      /* Clipboard access can be refused (an insecure origin, a permissions
+         policy). Silently leaving the icon unchanged is the honest signal:
+         nothing was copied, so nothing should say it was. */
+    }
+  };
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -205,7 +308,21 @@ export function ChatPanel({ turns, mode, conversationId, onFeatureCreated }: Pro
         <article className="turn" key={turn.id} aria-busy={turn.pending}>
           <div className="question">
             <span className="who">{turn.role.replace(/_/g, ' ').toLowerCase()}</span>
-            {turn.question}
+            {editing === turn.id ? (
+              <QuestionEditor
+                initial={turn.question}
+                busy={busy}
+                onCancel={() => setEditing(null)}
+                onSubmit={(next) => {
+                  setEditing(null);
+                  onResubmit?.(next, { turnId: turn.turnId!, localId: turn.id });
+                }}
+              />
+            ) : (
+              <>
+                {turn.question}
+              </>
+            )}
             {/* What was attached when this was sent. The composer is cleared
                 on send, so without this the record of which files went with
                 which question would be lost. */}
@@ -220,6 +337,51 @@ export function ChatPanel({ turns, mode, conversationId, onFeatureCreated }: Pro
               </span>
             ) : null}
           </div>
+
+          {/* Below the bubble, not inside it. Overlaid at the top-right they
+              crowded the role label and sat on top of the first line of a
+              short question; underneath, they have their own row and the
+              bubble keeps its shape. */}
+          {editing !== turn.id && !turn.pending && (
+            <div className="question-tools">
+              <button
+                type="button"
+                className={copied === turn.id ? 'done' : undefined}
+                onClick={() => copyQuestion(turn.id, turn.question)}
+                aria-label="Copy this question"
+                title={copied === turn.id ? 'Copied' : 'Copy'}
+              >
+                {copied === turn.id ? <IconCheck /> : <IconCopy />}
+              </button>
+              {/* Edit and re-run need a STORED turn to replace; a turn whose
+                  history write failed has no id, so they are not offered. */}
+              {turn.turnId && onResubmit && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(turn.id)}
+                    disabled={busy}
+                    aria-label="Edit this question and ask again"
+                    title="Edit"
+                  >
+                    <IconEdit />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onResubmit(turn.question, { turnId: turn.turnId!, localId: turn.id })
+                    }
+                    disabled={busy}
+                    aria-label="Ask this question again"
+                    title="Ask again"
+                  >
+                    <IconRerun />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="answer" aria-live="polite" aria-atomic="false">
             <Answer turn={turn} mode={mode} />
             <KeepAsFeature

@@ -7,6 +7,9 @@ export interface TraceStep {
   status: 'ok' | 'blocked' | 'error' | 'suppressed';
   reason?: string;
   rows?: Record<string, any>[];
+  /** diagnose_process only: measured process findings, each with its own
+   *  evidence and a recommendation anchored to a real benchmark. */
+  findings?: Finding[];
   /**
    * search_business_logic only: the actual (possibly truncated) source of
    * every stored procedure/function the model was shown, so this is
@@ -28,6 +31,8 @@ export interface TraceStep {
 }
 
 export interface Conversation {
+  /** Kept at the top of the list, above the paged remainder. */
+  pinned?: boolean;
   id: string;
   title: string;
   turns: number;
@@ -47,6 +52,9 @@ export interface AskResult {
   usage: { input: number; output: number; cacheRead: number };
   /** Which thread the turn landed in — set by the server on every ask. */
   conversation_id?: string | null;
+  /** The stored turn just created, so it can be edited or re-run without
+   *  refetching the thread. Null if the history write failed. */
+  turn_id?: string | null;
   /** Files attached to this conversation that were actually placed in the
    *  model's context for this turn — shown for the same reason SQL is shown:
    *  every source the answer could see should be visible, not just trusted. */
@@ -108,6 +116,15 @@ export interface Turn {
   id: string;
   question: string;
   role: string;
+  /**
+   * The stored turn this bubble corresponds to, when there is one.
+   *
+   * Editing and re-running both replace a stored exchange, so both need the
+   * server's id — a local key is not addressable. Absent means the turn was
+   * never written (the history write failed), and the controls are correctly
+   * not offered rather than offered and broken.
+   */
+  turnId?: string | null;
   /** Files that were attached when this question was sent, shown on the
    *  message itself so the composer can be cleared without losing the record
    *  of what went with it. */
@@ -210,4 +227,22 @@ export interface Me {
   all_branches: boolean;
   branch_ids: number[];
   branch_scope: 'ALL' | 'BRANCH';
+}
+
+/** One measured problem, what it costs, and what to do — from diagnose_process.
+ *  Every field is computed server-side from SQL, never written by the model. */
+export interface Finding {
+  id: string;
+  severity: 'critical' | 'high' | 'medium';
+  title: string;
+  /** The one figure the finding is about, split out of its prose so the panel
+   *  can set it once and large. */
+  headline: { value: string; label: string } | null;
+  delta: { value: string; direction: 'up' | 'down'; is_good: boolean } | null;
+  measured: string;
+  trend: string | null;
+  benchmark: string | null;
+  impact: string;
+  recommendation: string;
+  evidence: string[];
 }

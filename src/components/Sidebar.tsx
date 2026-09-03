@@ -8,6 +8,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onOpenChat: (id: string) => void;
   onDeleteChat: (id: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   /** Fetch the next page. Called when the end of the list scrolls into view. */
   onLoadMore: () => void;
   hasMore: boolean;
@@ -15,7 +16,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  chats, activeChatId, busy, onNewChat, onOpenChat, onDeleteChat,
+  chats, activeChatId, busy, onNewChat, onOpenChat, onDeleteChat, onTogglePin,
   onLoadMore, hasMore, loadingMore,
 }: SidebarProps) {
   return (
@@ -36,6 +37,7 @@ export function Sidebar({
         onNew={onNewChat}
         onOpen={onOpenChat}
         onDelete={onDeleteChat}
+        onTogglePin={onTogglePin}
         onLoadMore={onLoadMore}
         hasMore={hasMore}
         loadingMore={loadingMore}

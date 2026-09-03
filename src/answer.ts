@@ -95,7 +95,15 @@ export function forecastChart(trace: TraceStep[]): ChartSpec | null {
 
 export function inferChart(trace: TraceStep[]): ChartSpec | null {
   const step = [...trace].reverse().find(
-    (s) => s.status === 'ok' && Array.isArray(s.rows) && s.rows.length >= 3,
+    (s) =>
+      s.status === 'ok' &&
+      Array.isArray(s.rows) &&
+      s.rows.length >= 3 &&
+      /* diagnose_process carries the funnel on its trace so the step is
+         inspectable, but those rows are not a chart: inferring one produced a
+         single bar labelled "drop from previous by stage" underneath a findings
+         panel that had already said it in words. The findings ARE the render. */
+      s.tool !== 'diagnose_process',
   );
   if (!step?.rows) return null;
 
@@ -108,7 +116,26 @@ export function inferChart(trace: TraceStep[]): ChartSpec | null {
   // With both a count and an amount present, the amount is what the question
   // was about: "outstanding by ageing" means the money, not the invoice count.
   const MAGNITUDE = /amount|outstanding|revenue|value|total|cost|profit|freight|weight|km|balance/i;
-  const value = numeric.find((c) => MAGNITUDE.test(c)) ?? numeric[numeric.length - 1];
+
+  /**
+   * An EXTREME is not a magnitude, and charting one lies about the shape.
+   *
+   * Asked how many consignments are in transit, the answer tabled a count and
+   * an average age per status — and the chart drew MAX age, because that was
+   * simply the last numeric column. The tallest bar became the status with one
+   * old outlier rather than the one with the most consignments, which is the
+   * opposite of what the reader was being told in the prose beside it.
+   */
+  const EXTREME = /^(max|min|oldest|newest|longest|shortest|worst|best)[_ ]|_(max|min)$/i;
+  /** What a breakdown is almost always about when no money column is present. */
+  const COUNT = /^(n|count|consignments|shipments|rows|total_[a-z_]*count)$|count|_count$/i;
+
+  const usable = numeric.filter((c) => !EXTREME.test(c));
+  const pool = usable.length ? usable : numeric;
+  const value =
+    pool.find((c) => MAGNITUDE.test(c)) ??
+    pool.find((c) => COUNT.test(c)) ??
+    pool[pool.length - 1];
 
   // A month-keyed series is a trend; anything else is a comparison.
   const temporal = /month|date|period|day|week|year/i.test(label);
