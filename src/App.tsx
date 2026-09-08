@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ask, conversationTurns, conversations, deleteAttachment, deleteConversation, listAttachments, setPinned,
+  ask, ConnectionLostError, conversationTurns, conversations, deleteAttachment, deleteConversation,
+  listAttachments, recoverAskResult, setPinned,
   listRoles, schema, switchRole, uploadAttachment,
 } from './api';
 import { useTheme } from './theme';
@@ -100,6 +101,11 @@ export default function App() {
      extra /auth/roles calls, i.e. the whole mount effect re-running. */
   const navRef = useRef(navigate);
   navRef.current = navigate;
+  /* Same assign-on-render pattern: the send handler needs the turn ids that
+     existed BEFORE it ran, and adding `turns` to its dependency list would
+     rebuild the callback every time an answer landed. */
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
 
   const applyRole = useCallback(async (role: string, initial = false) => {
     setBusy(true);
@@ -275,6 +281,11 @@ export default function App() {
          still prints "In context for this answer". Clearing the composer tidies
          the input without hiding that fact. */
       const sent = attachments;
+      /* Captured before the pending bubble is appended, so recovery can tell a
+         turn the server just created from one that was already in the thread. */
+      const turnIdsBeforeAsk = turnsRef.current
+        .map((x) => x.turnId)
+        .filter((x): x is string => !!x);
       setTurns((t) => {
         /* Everything from the replaced turn onward goes now, not when the
            answer lands: leaving it up would show the old exchange and the new
@@ -311,6 +322,38 @@ export default function App() {
         }
         await reloadChats();
       } catch (e: any) {
+        /* A dropped connection is not the same as a failed answer. A long
+           question can outlive a proxy's read timeout while the service keeps
+           working and stores the turn — which is why refreshing the page used
+           to reveal the answer the user had just been told did not arrive.
+           Look for it rather than reporting a failure that already resolved
+           itself. The bubble stays pending throughout: the work really is
+           still in flight, and flashing an error we are about to retract is
+           worse than a longer wait. */
+        if (e instanceof ConnectionLostError) {
+          const recovered = await recoverAskResult(
+            chatId,
+            q,
+            turnIdsBeforeAsk,
+          ).catch(() => null);
+
+          if (recovered) {
+            setTurns((t) =>
+              t.map((turn) =>
+                turn.id === id
+                  ? { ...turn, result: recovered, pending: false, turnId: recovered.turn_id ?? null }
+                  : turn,
+              ),
+            );
+            if (recovered.conversation_id && recovered.conversation_id !== chatId) {
+              setChatId(recovered.conversation_id);
+              navigate(`/c/${recovered.conversation_id}`, { replace: true });
+            }
+            await reloadChats();
+            return;
+          }
+        }
+
         setTurns((t) =>
           t.map((turn) =>
             turn.id === id
