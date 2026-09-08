@@ -37,7 +37,13 @@ export function SqlInspector({
         <span className="inspector-meta">
           {queries} {queries === 1 ? 'query' : 'queries'} · {hops} {hops === 1 ? 'step' : 'steps'}
           {blocked > 0 && (
-            <span className="badge badge-blocked" title="Refused: outside this role's access">
+            /* Deliberately does NOT say "outside this role's access". Most
+               refusals are not access refusals at all — SELECT *, an
+               unparseable statement and a banned function all land here, and
+               telling someone their role was too junior when the data was
+               fully available to them is the single most damaging thing this
+               panel could get wrong. The per-step reason below says which. */
+            <span className="badge badge-blocked" title="Refused before it reached the database — open for the reason">
               {blocked} refused
             </span>
           )}
@@ -75,7 +81,7 @@ export function SqlInspector({
                           (step.status === 'suppressed'
                             ? 'held back — group too small to report'
                             : step.status === 'blocked'
-                              ? 'refused — outside this role'
+                              ? 'refused before it reached the database'
                               : step.status)}
                       </span>
                     )}

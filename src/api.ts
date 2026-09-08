@@ -62,6 +62,24 @@ export async function switchRole(role: string, branchIds?: number[]): Promise<vo
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+/**
+ * The connection died before the response arrived — the browser's bare
+ * "Failed to fetch". Distinguished from every other failure because it is the
+ * one where the request may well have SUCCEEDED: a long answer can outlive a
+ * reverse proxy's read timeout, and the service, which never learns the socket
+ * closed, finishes the work and stores the turn regardless. Reporting that as
+ * an error loses an answer that exists. See recoverAskResult.
+ */
+export class ConnectionLostError extends Error {
+  constructor() {
+    super(
+      'The connection dropped before the answer arrived. The answer may still ' +
+        'have been saved — reopen this conversation to check.',
+    );
+    this.name = 'ConnectionLostError';
+  }
+}
+
 export async function ask(
   question: string,
   conversationId: string | null,
@@ -69,19 +87,86 @@ export async function ask(
    *  used when a question is edited, or re-run for a different answer. */
   replaceTurnId?: string | null,
 ): Promise<AskResult> {
-  const res = await fetch(url('/agent/ask'), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      question,
-      conversation_id: conversationId,
-      ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url('/agent/ask'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        question,
+        conversation_id: conversationId,
+        ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
+      }),
+    });
+  } catch {
+    // fetch only rejects on a network-level failure; an HTTP error status
+    // resolves normally and is handled by json() below. So reaching here means
+    // the socket, not the service, gave up.
+    throw new ConnectionLostError();
+  }
   return json<AskResult>(res);
+}
+
+/**
+ * Looks for the answer to a question whose request died in transit.
+ *
+ * The service stores the turn when it finishes, so the answer usually appears
+ * shortly after the browser has given up waiting for it. Polls the thread
+ * until it does.
+ *
+ * Two conditions have to hold before a turn is accepted as the missing one,
+ * and both matter. It must be the LAST turn in the thread, and its id must be
+ * one the client has not seen. Matching on the question text alone would
+ * happily return a months-old answer to the same question asked twice, which
+ * is a worse failure than the error it replaces — a stale figure presented as
+ * a fresh one.
+ */
+export async function recoverAskResult(
+  conversationId: string | null,
+  question: string,
+  knownTurnIds: string[],
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<AskResult | null> {
+  const attempts = opts.attempts ?? 12;
+  const delayMs = opts.delayMs ?? 5000;
+  const wanted = question.trim();
+  const seen = new Set(knownTurnIds);
+
+  for (let i = 0; i < attempts; i++) {
+    await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      // A first message has no conversation id yet — the thread was created by
+      // the very request that was lost. Threads list newest-first, so the one
+      // just created is at the top; the question check below is what actually
+      // confirms it, the position only decides where to look.
+      const id =
+        conversationId ?? (await conversations({ limit: 1 })).items[0]?.id ?? null;
+      if (!id) continue;
+
+      const turns = await conversationTurns(id);
+      const last = turns[turns.length - 1];
+      if (!last || seen.has(last.id) || last.question.trim() !== wanted) continue;
+
+      return {
+        answer: last.answer,
+        trace: last.trace,
+        hops: last.hops,
+        // Not recoverable from storage, and not worth a second endpoint: the
+        // token counters are per-request telemetry, and this request is over.
+        usage: { input: 0, output: 0, cacheRead: 0 },
+        conversation_id: id,
+        turn_id: last.id,
+      };
+    } catch {
+      // The thread read failed too — probably the same underlying outage.
+      // Keep polling; giving up here would discard an answer that may land a
+      // few seconds later.
+    }
+  }
+  return null;
 }
 
 export async function schema(): Promise<{ role: string; views: string[] }> {
