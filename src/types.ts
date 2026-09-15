@@ -36,6 +36,10 @@ export interface Conversation {
   id: string;
   title: string;
   turns: number;
+  /** Files attached to this thread. Drives the paperclip in the list — the
+   *  indicator used to be an emoji stored inside the title, which meant a
+   *  rename silently removed it. Optional: an older server does not send it. */
+  attachments?: number;
   updatedAt: string;
 }
 
@@ -75,7 +79,35 @@ export interface Attachment {
 }
 
 export interface ChartSpec {
-  type: 'bar' | 'line' | 'pie' | 'forecast';
+  /**
+   * Forms deliberately excluded, so the next person does not re-add them:
+   *  - dual-axis (bar + line on two y-scales) is the single most common chart
+   *    mistake; two measures at different scales become small multiples here,
+   *    which needsSmallMultiples() already does automatically.
+   *  - stacked AREA, because comparing a middle band against a moving baseline
+   *    is not something anyone can do by eye.
+   */
+  type:
+    | 'bar'
+    /** Horizontal bars. Same encoding as bar, but category labels get a real
+     *  gutter instead of being rotated or truncated — which is most ranking
+     *  answers here, where the labels are branch, customer and vendor names. */
+    | 'hbar'
+    | 'line'
+    /** Parts of a whole across a category or a period. Only valid when every
+     *  series shares a unit; unit-mismatched series must stay separate. */
+    | 'stacked'
+    | 'pie'
+    /** Two NUMERIC columns against each other — cost against weight, load
+     *  against capacity. The only form here that does not need a categorical
+     *  label column, and the only one that shows a relationship rather than a
+     *  ranking. */
+    | 'scatter'
+    /** Ranked share with a cumulative curve: "which few things are most of the
+     *  total". Both marks are percentages on ONE axis — never a count axis and
+     *  a percent axis together. */
+    | 'pareto'
+    | 'forecast';
   x: string;
   y: string[];
   title?: string;
@@ -164,6 +196,10 @@ export interface NewPanel {
 
 export interface DashboardSummary {
   id: string;
+  /** Raised to the top of the list. SHARED across the tenant — dashboards are
+   *  everybody's here, so pinning one is a statement about the company rather
+   *  than a personal bookmark. */
+  pinned?: boolean;
   title: string;
   description: string | null;
   userId: string;

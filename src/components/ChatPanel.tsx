@@ -3,6 +3,7 @@ import type { Mode } from '../theme';
 import type { Turn, TraceStep } from '../types';
 import { forecastChart, inferChart, parseAnswer, rowsForChart } from '../answer';
 import { exportAsPdf, exportRowsAsCsv, provenanceFrom } from '../export';
+import { formatBytes, splitFilename } from '../format';
 import { ChartRenderer } from './ChartRenderer';
 import { ExportFileCard } from './ExportFileCard';
 import { IconCheck, IconCopy, IconEdit, IconFile, IconRerun } from './icons';
@@ -265,9 +266,19 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
             <span
               key={a.filename}
               className="attachment-chip"
-              title={a.truncated ? 'Shown up to the context limit for this turn' : undefined}
+              title={a.truncated ? 'Shown up to the context limit for this turn' : a.filename}
             >
-              {a.filename}
+              {/* Bare text in a flex container cannot ellipsise, and this chip
+                  has a max-width but no overflow rule — so a long name spilled
+                  straight out of it. Same split as the sent chip: the stem
+                  truncates, the extension survives. */}
+              {/* One wrapper, because the chip is a flex row with a gap — as
+                  two separate items the gap opened between the ellipsis and
+                  the extension and rendered as "weekly-booking… .xlsx". */}
+              <span className="attachment-chip-file">
+                <span className="attachment-chip-name">{splitFilename(a.filename).stem}</span>
+                <span className="attachment-chip-ext">{splitFilename(a.filename).ext}</span>
+              </span>
               {a.truncated && <span className="attachment-chip-flag">truncated</span>}
             </span>
           ))}
@@ -328,12 +339,39 @@ export function ChatPanel({
                 which question would be lost. */}
             {turn.sentAttachments?.length ? (
               <span className="question-files">
-                {turn.sentAttachments.map((a) => (
-                  <span key={a.id} className="question-file" title={a.filename}>
-                    <IconFile />
-                    {a.filename}
-                  </span>
-                ))}
+                {turn.sentAttachments.map((a) => {
+                  const { stem, ext } = splitFilename(a.filename);
+                  /* Everything the chip knows, in the order it is scanned:
+                     what the file is, how much of it there is, and whether the
+                     agent saw all of it. Held back before, so a 5 MB file and a
+                     200-byte one looked identical. */
+                  const meta = [
+                    a.kind.toUpperCase(),
+                    a.rows != null ? `${a.rows.toLocaleString()} rows` : null,
+                    formatBytes(a.bytes),
+                  ].filter(Boolean);
+                  return (
+                    <span key={a.id} className="question-file" title={a.filename}>
+                      <IconFile />
+                      <span className="question-file-text">
+                        <span className="question-file-name">
+                          {/* Two elements, not one string: the stem shrinks and
+                              takes the ellipsis, the extension never does. */}
+                          <span className="question-file-stem">{stem}</span>
+                          {ext && <span className="question-file-ext">{ext}</span>}
+                        </span>
+                        <span className="question-file-meta">
+                          {meta.join(' · ')}
+                          {a.truncated && (
+                            <span className="question-file-trunc">
+                              read to limit
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    </span>
+                  );
+                })}
               </span>
             ) : null}
           </div>

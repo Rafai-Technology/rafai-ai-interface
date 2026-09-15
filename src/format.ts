@@ -63,3 +63,31 @@ export function makeCategoryFormat(values: any[]): { short: (v: any) => string; 
   return { short: wrap(shortFmt), full: wrap(fullFmt) };
 }
 
+
+/**
+ * Splits a filename into the part that may be shortened and the part that must
+ * not be.
+ *
+ * Truncating a filename from the right eats the extension, which is the single
+ * most useful character group in it: "weekly-bookings-sep2025-aug202…" no longer
+ * tells you whether you attached a spreadsheet or a text file. Keeping the
+ * extension as its own non-shrinking element means CSS ellipsis lands on the
+ * stem instead — "weekly-bookings-sep20….csv".
+ *
+ * Only a trailing extension of 1-5 characters is split off; a dot inside a name
+ * like "2026.08.25-bookings" is left alone rather than treated as one.
+ */
+export function splitFilename(name: string): { stem: string; ext: string } {
+  const m = /^(.*)(\.[A-Za-z0-9]{1,5})$/.exec(name);
+  return m ? { stem: m[1], ext: m[2] } : { stem: name, ext: '' };
+}
+
+/** Bytes as something a person reads at a glance. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}

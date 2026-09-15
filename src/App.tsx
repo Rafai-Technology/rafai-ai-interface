@@ -13,6 +13,9 @@ import { Composer } from './components/Composer';
 import { IconPanel } from './components/icons';
 import { Sidebar } from './components/Sidebar';
 
+/** The role a session opens in when nothing else has been chosen. */
+const DEFAULT_ROLE = 'ADMIN';
+
 /**
  * Starter questions now come from the API, keyed by the role's profile, so the
  * frontend does not carry its own copy of a per-customer role list. Each set
@@ -40,7 +43,7 @@ const toTurn = (role: string) => (h: HistoryTurn): Turn => ({
 export default function App() {
   const { mode, toggle } = useTheme();
   const [roles, setRoles] = useState<RoleInfo[]>([]);
-  const [active, setActive] = useState<string>('OPERATION_EXECUTIVE');
+  const [active, setActive] = useState<string>(DEFAULT_ROLE);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [chats, setChats] = useState<Conversation[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
@@ -180,7 +183,11 @@ export default function App() {
         const list = await listRoles();
         /* Role first, list second. setRoles opens the route effect's gate, and
            opening it before applyRole has settled is what let the two race. */
-        await applyRole(list[0]?.role ?? 'OPERATION_EXECUTIVE', true);
+        /* Chosen BY NAME, not by position. This was list[0], so the default
+           was whatever happened to sit first in roles.json — reordering that
+           file silently changed which role every new session started in. */
+        const preferred = list.find((r) => r.role === DEFAULT_ROLE)?.role;
+        await applyRole(preferred ?? list[0]?.role ?? DEFAULT_ROLE, true);
         setRoles(list);
       } catch (e: any) {
         setFatal(`${e.message ?? e}. Is the agent service running on :3000?`);

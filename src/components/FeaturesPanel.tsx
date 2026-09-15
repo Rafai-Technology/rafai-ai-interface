@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mode } from '../theme';
 import type { DashboardPanelResult, DashboardRun, DashboardSummary } from '../types';
-import { deleteDashboard, listDashboards, runDashboard } from '../api';
+import { deleteDashboard, listDashboards, runDashboard, setDashboardPinned, reorderDashboardPanels } from '../api';
 import { ChartRenderer } from './ChartRenderer';
+import { IconPin } from './icons';
 
 /* ------------------------------------------------------------- formatting */
 
@@ -200,9 +201,21 @@ function fillRows(spans: number[]): number[] {
  * is the one place the saved order is overridden, and only to lift figures to
  * the top; everything else keeps its position.
  */
+/**
+ * The saved order, unchanged.
+ *
+ * This used to float stat figures to the front, which was a reasonable default
+ * when nobody could say otherwise. Panels can now be dragged into an order and
+ * that order is stored, so re-sorting here would quietly undo the arrangement
+ * somebody just made — the card would spring back and the drag would look
+ * broken. An automatic heuristic yields to an explicit choice.
+ *
+ * Boards saved before this keep their creation order, which is what the
+ * database always held; the difference is that it is now visible and can be
+ * changed.
+ */
 function forDisplay(panels: DashboardPanelResult[]): DashboardPanelResult[] {
-  const rank = (p: DashboardPanelResult) => (shapeOf(p) === 'figure' ? 0 : 1);
-  return [...panels].sort((a, b) => rank(a) - rank(b));
+  return panels;
 }
 
 /* --------------------------------------------------------------- fragments */
@@ -518,8 +531,20 @@ function PanelModal({ p, mode, role, onClose }: {
 
 /* ------------------------------------------------------------------- panel */
 
-function Panel({ p, mode, role, span }: {
+function Panel({ p, mode, role, span, drag }: {
   p: DashboardPanelResult; mode: Mode; role: string; span: number;
+  /** Omitted while the board is busy, which disables reordering wholesale. */
+  drag?: {
+    index: number;
+    count: number;
+    isDragging: boolean;
+    isOver: boolean;
+    onStart: (i: number) => void;
+    onOver: (i: number) => void;
+    onDrop: (i: number) => void;
+    onEnd: () => void;
+    onMove: (from: number, to: number) => void;
+  };
 }) {
   const shape = shapeOf(p);
   const [expanded, setExpanded] = useState(false);
@@ -527,12 +552,61 @@ function Panel({ p, mode, role, span }: {
 
   return (
     <section
-      className={`pnl pnl-${shape}`}
+      className={`pnl pnl-${shape}${drag?.isDragging ? ' dragging' : ''}${
+        drag?.isOver ? ' drop-target' : ''
+      }`}
       style={{ ['--span' as any]: span, ['--rows' as any]: rows }}
       aria-label={p.title}
+      /* The whole card is the drop zone but only the handle starts a drag:
+         making the card itself draggable turned every attempt to select a
+         number in it into a drag. */
+      onDragOver={drag ? (e) => { e.preventDefault(); drag.onOver(drag.index); } : undefined}
+      onDrop={drag ? (e) => { e.preventDefault(); drag.onDrop(drag.index); } : undefined}
     >
      <div className="pnl-inner" ref={ref}>
       <header className="pnl-head">
+        {drag && (
+          /* A handle, and two buttons that do the same job from a keyboard.
+             Drag alone would put reordering out of reach for anyone not using
+             a mouse, and this is the only way to arrange a board. */
+          <span className="pnl-grip-set">
+            <span
+              className="pnl-grip"
+              draggable
+              role="button"
+              tabIndex={-1}
+              aria-hidden="true"
+              title="Drag to reorder — the order is saved for everyone"
+              onDragStart={(e) => {
+                // Firefox will not start a drag without payload on the event.
+                e.dataTransfer.setData('text/plain', String(drag.index));
+                e.dataTransfer.effectAllowed = 'move';
+                drag.onStart(drag.index);
+              }}
+              onDragEnd={drag.onEnd}
+            >
+              ⠿
+            </span>
+            <span className="pnl-move">
+              <button
+                type="button"
+                disabled={drag.index === 0}
+                aria-label={`Move ${p.title} earlier`}
+                onClick={() => drag.onMove(drag.index, drag.index - 1)}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                disabled={drag.index === drag.count - 1}
+                aria-label={`Move ${p.title} later`}
+                onClick={() => drag.onMove(drag.index, drag.index + 1)}
+              >
+                ›
+              </button>
+            </span>
+          </span>
+        )}
         <h3>{p.title}</h3>
         <div className="pnl-tags">
           {p.status === 'ok' && p.rowCount > 1 && (
@@ -666,6 +740,30 @@ export function FeaturesPanel({ mode, role, openId, onOpen, onBack }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
+  /**
+   * Pin or unpin, optimistically.
+   *
+   * The card moves before the request resolves, because the point of the
+   * control is that the list reorders under the cursor. On failure the previous
+   * list is restored — a pin that silently did not stick is worse than one that
+   * visibly bounces back.
+   */
+  async function togglePin(id: string, pinned: boolean) {
+    const before = list;
+    setList((prev) => {
+      const next = prev.map((d) => (d.id === id ? { ...d, pinned } : d));
+      const rank = (d: typeof next[number]) => (d.pinned ? 0 : 1);
+      return [...next].sort(
+        (a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt),
+      );
+    });
+    try {
+      await setDashboardPinned(id, pinned);
+    } catch {
+      setList(before);
+    }
+  }
+
   async function remove(id: string) {
     setConfirmId(null);
     await deleteDashboard(id);
@@ -679,6 +777,62 @@ export function FeaturesPanel({ mode, role, openId, onOpen, onBack }: {
   );
 
   /* ---------------------------------------------------------- list view */
+
+  /* Which card is being dragged, and which it is currently over. Held here
+     rather than in each Panel so only one card can be the drop target. */
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  /**
+   * The authoritative source index, mirrored into a ref.
+   *
+   * The drop handler cannot read the state: it closes over the value from the
+   * render in which it was created, and dragstart's setState only reaches a
+   * later render. A pointer drag is slow enough that the re-render lands in
+   * between, so this works by luck and fails the moment the two events arrive
+   * in one tick — which is exactly what a synthetic drag does, and how this was
+   * found. The state stays for the visuals; the ref decides what moves.
+   */
+  const dragFromRef = useRef<number | null>(null);
+  const beginDrag = useCallback((i: number) => {
+    dragFromRef.current = i;
+    setDragFrom(i);
+  }, []);
+  const endDrag = useCallback(() => {
+    dragFromRef.current = null;
+    setDragFrom(null);
+    setDragOver(null);
+  }, []);
+
+  /**
+   * Move a panel and save the new order.
+   *
+   * Optimistic: the board rearranges immediately, because a drag that only
+   * takes effect after a round trip feels broken. On failure the previous order
+   * is restored — an arrangement that silently did not save is worse than one
+   * that visibly snaps back.
+   *
+   * The saved order is SHARED, like the dashboard and its pin: everyone opening
+   * this board sees the arrangement.
+   */
+  const movePanel = useCallback(async (from: number, to: number) => {
+    if (!run || from === to || to < 0 || to >= run.panels.length) return;
+    const before = run;
+    const next = [...run.panels];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setRun({ ...run, panels: next });
+    try {
+      /* Ids only. Sending the panels back through updateDashboardPanels
+         re-validates every statement against this viewer, so reordering a
+         board containing a freight panel failed for anyone without money
+         access — a permission check on SQL nobody was editing. */
+      await reorderDashboardPanels(run.id, next.map((p) => p.id));
+    } catch (e) {
+      setRun(before);
+      setError((e as Error).message);
+    }
+  }, [run]);
+
   if (!openId) {
     return (
       <div className="feat">
@@ -739,14 +893,30 @@ export function FeaturesPanel({ mode, role, openId, onOpen, onBack }: {
                     </button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    className="feat-del"
-                    aria-label={`Delete ${d.title}`}
-                    onClick={() => setConfirmId(d.id)}
-                  >
-                    ×
-                  </button>
+                  <>
+                    {/* Pinning is shared: dashboards are tenant-wide, so this
+                        raises the board for everyone. The title says so, because
+                        a control that quietly changes a colleague's screen
+                        should say it does. */}
+                    <button
+                      type="button"
+                      className={`feat-pin${d.pinned ? ' on' : ''}`}
+                      aria-pressed={Boolean(d.pinned)}
+                      aria-label={`${d.pinned ? 'Unpin' : 'Pin'} ${d.title}`}
+                      title={d.pinned ? 'Unpin — for everyone' : 'Pin to the top — for everyone'}
+                      onClick={() => void togglePin(d.id, !d.pinned)}
+                    >
+                      <IconPin filled={Boolean(d.pinned)} />
+                    </button>
+                    <button
+                      type="button"
+                      className="feat-del"
+                      aria-label={`Delete ${d.title}`}
+                      onClick={() => setConfirmId(d.id)}
+                    >
+                      ×
+                    </button>
+                  </>
                 )}
               </li>
             ))}
@@ -807,7 +977,31 @@ export function FeaturesPanel({ mode, role, openId, onOpen, onBack }: {
               const ordered = forDisplay(shown);
               const spans = fillRows(ordered.map((p) => spanFor(p, shapeOf(p))));
               return ordered.map((p, i) => (
-                <Panel key={p.id} p={p} mode={mode} role={role} span={spans[i]} />
+                <Panel
+                  key={p.id}
+                  p={p}
+                  mode={mode}
+                  role={role}
+                  span={spans[i]}
+                  /* Reordering is off while a refresh is in flight: the board
+                     is about to be replaced by the server's copy anyway, and a
+                     drag landing in that gap would be lost without explanation. */
+                  drag={busy ? undefined : {
+                    index: i,
+                    count: ordered.length,
+                    isDragging: dragFrom === i,
+                    isOver: dragOver === i && dragFrom !== null && dragFrom !== i,
+                    onStart: beginDrag,
+                    onOver: setDragOver,
+                    onDrop: (to) => {
+                      const from = dragFromRef.current;
+                      if (from !== null) void movePanel(from, to);
+                      endDrag();
+                    },
+                    onEnd: endDrag,
+                    onMove: (from, to) => void movePanel(from, to),
+                  }}
+                />
               ));
             })()}
       </div>

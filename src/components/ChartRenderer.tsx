@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line,
-  LineChart, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip,
-  XAxis, YAxis,
+  LineChart, Pie, PieChart, ReferenceLine, ResponsiveContainer, Scatter,
+  ScatterChart, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import type { ChartSpec, TraceStep } from '../types';
 import { PALETTE, type Mode } from '../theme';
@@ -67,6 +67,24 @@ const LINE_CATEGORY_LIMIT = 12;
 const BARS_PER_PAGE = 12;
 /** On a phone twelve bars is about 24px each, which is a stripe, not a bar. */
 const BARS_PER_PAGE_NARROW = 6;
+/** Horizontal rows cost height, not width, and a card has more height to give
+ *  before a row stops being readable. */
+const HBARS_PER_PAGE = 14;
+const HBARS_PER_PAGE_NARROW = 8;
+
+/** Longest category label, in characters — the signal that bars should lie
+ *  down. "VIJAYAWADA BHAVANIPURAM" and "RIVAN ALUMINIUM PRIVATE LIMITED" are
+ *  ordinary values in this data, and vertical bars can only rotate or clip
+ *  them. */
+const LONG_LABEL_CHARS = 14;
+
+/** Bars a Pareto draws before folding the remainder into one "Other". Beyond
+ *  this the axis cannot letter the categories and the form stops showing the
+ *  vital few, which is the only thing it is for. */
+const PARETO_CATEGORIES = 8;
+/** Characters of a category name a Pareto axis will letter before cutting.
+ *  Rotated at -35 degrees, more than this runs past the edge of the card. */
+const PARETO_LABEL_CHARS = 16;
 
 // Marks are drawn at full size immediately: an entry animation adds nothing to
 // an answer the reader is already waiting on, and it makes what is on screen at
@@ -196,7 +214,17 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
   };
 
   const card = exportRequest && (
-    <ExportFileCard format={exportRequest.format} title={title} onDownload={runRequestedExport} />
+    <ExportFileCard
+      format={exportRequest.format}
+      title={title}
+      /* Counted from what will actually be written, not from the request: the
+         card should describe the file, and the file is built from these. */
+      rowCount={rows.length}
+      hasChart={Boolean(spec.x)}
+      queryCount={(trace ?? []).filter((s) => s.tool === 'run_sql' && s.status === 'ok' && s.sql).length}
+      caveatCount={exportRequest.caveats?.length ?? 0}
+      onDownload={runRequestedExport}
+    />
   );
 
   if (!series.length) return null;
@@ -284,7 +312,42 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
     );
   }
 
-  const coercedType = spec.type === 'pie' && data.length > MAX_PIE_SEGMENTS ? 'bar' : spec.type;
+  /**
+   * Long category labels lie the bars down.
+   *
+   * Vertical bars can only rotate a long label or clip it, and this data is
+   * full of them — "VIJAYAWADA BHAVANIPURAM", "RIVAN ALUMINIUM PRIVATE
+   * LIMITED", "CTS EXPRESS LOGISTICS PVT LTD". A rotated axis is read at an
+   * angle and a clipped one is not read at all, so a ranking whose labels are
+   * long is drawn horizontally whether the model asked for that or not. The
+   * encoding is identical; only the axis the labels sit on changes.
+   *
+   * Never applied to a temporal axis: time reads left to right, and standing
+   * a month series on its side is a worse chart, not a better one.
+   */
+  const labelsAreLong =
+    !TEMPORAL_KEY.test(spec.x) &&
+    data.some((r) => String(r[spec.x] ?? '').length > LONG_LABEL_CHARS);
+
+  /* A scatter needs BOTH axes numeric. Asked for one over a branch name the
+     x-axis would collapse every category to 0 and stack the whole dataset in a
+     single column — so it falls back to the form that does work on a label. */
+  const scatterUsable =
+    spec.type === 'scatter' && data.every((r) => isNumeric(r[spec.x]));
+  /* Stacking one series is just a bar with extra ceremony. */
+  const stackUsable = spec.type === 'stacked' && series.length > 1;
+
+  const requested: ChartSpec['type'] =
+    (spec.type === 'scatter' && !scatterUsable) || (spec.type === 'stacked' && !stackUsable)
+      ? 'bar'
+      : spec.type;
+
+  const coercedType: ChartSpec['type'] =
+    requested === 'pie' && data.length > MAX_PIE_SEGMENTS
+      ? (labelsAreLong ? 'hbar' : 'bar')
+      : requested === 'bar' && labelsAreLong && series.length === 1
+        ? 'hbar'
+        : requested;
   const split = coercedType !== 'pie' && needsSmallMultiples(data, series);
 
   // What the reader could usefully switch to, given this exact result —
@@ -309,11 +372,33 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
     || data.every((r) => LOOKS_TEMPORAL(r[spec.x]));
   const canLine = !split && (temporalAxis || data.length <= LINE_CATEGORY_LIMIT);
 
-  const availableTypes: ChartSpec['type'][] = split
+  /* A scatter plots two numeric columns against each other, so it has no
+     categorical axis to re-plot as bars — it is offered alone. */
+  const isScatter = coercedType === 'scatter';
+
+  /**
+   * Pareto needs a single ranked, non-negative series over categories. It is
+   * meaningless on a time axis (a "cumulative share of months" answers no
+   * question) and on values that can be negative, where a running total can
+   * fall and the curve stops being cumulative in any readable sense.
+   */
+  const canPareto =
+    !split && !temporalAxis && series.length === 1 && data.length >= 3 &&
+    data.every((r) => Number(r[series[0]]) >= 0);
+
+  /* Stacked is only honest when the series share a unit — parts of one whole.
+     needsSmallMultiples already refuses the mismatched case, so reaching here
+     with >1 series means they are comparable. */
+  const canStack = !split && series.length > 1;
+
+  const availableTypes: ChartSpec['type'][] = split || isScatter
     ? [coercedType]
     : ([
         'bar',
+        'hbar',
+        ...(canStack ? (['stacked'] as const) : []),
         ...(canLine ? (['line'] as const) : []),
+        ...(canPareto ? (['pareto'] as const) : []),
         ...(canPie ? (['pie'] as const) : []),
       ] as ChartSpec['type'][]);
 
@@ -380,7 +465,13 @@ function ChartWithTypeSwitch({
                   onClick={() => setPickedType(t)}
                   aria-pressed={type === t}
                 >
-                  {t === 'bar' ? 'Bar' : t === 'line' ? 'Line' : 'Pie'}
+                  {t === 'bar' ? 'Bar'
+                    : t === 'hbar' ? 'Rows'
+                    : t === 'stacked' ? 'Stacked'
+                    : t === 'line' ? 'Line'
+                    : t === 'pareto' ? 'Pareto'
+                    : t === 'scatter' ? 'Scatter'
+                    : 'Pie'}
                 </button>
               ))}
             </div>
@@ -679,6 +770,13 @@ function Plot({
   const measured = useMeasuredWidth(wrapRef);
 
   const fmt = useMemo(() => makeCategoryFormat(data.map((r) => r[x])), [data, x]);
+  /* Sizes the label gutter on horizontal bars. Measured off the SHORTENED
+     label, because that is what is actually painted — sizing off the raw value
+     reserves room for text the axis then ellipsises away. */
+  const longestLabel = useMemo(
+    () => data.reduce((m, r) => Math.max(m, String(fmt.short(r[x]) ?? '').length), 0),
+    [data, x, fmt],
+  );
   const num = (v: any) => (isNumeric(v) ? Number(v).toLocaleString('en-IN') : '—');
 
   // Narrow cards get a shorter plot and a tighter y-axis gutter: on a phone the
@@ -689,9 +787,16 @@ function Plot({
   const yAxisWidth = narrow ? 38 : 52;
 
   /* Paging is bar-only: a line chart reads fine with many points, and cutting
-     a time series into pages would hide the shape that is the whole point. */
-  const perPage = narrow ? BARS_PER_PAGE_NARROW : BARS_PER_PAGE;
-  const paged = type === 'bar' && data.length > perPage;
+     a time series into pages would hide the shape that is the whole point.
+     Horizontal bars page too, but hold more: a row costs ~26px of height
+     whereas a vertical bar needs ~44px of width to stay a bar rather than a
+     stripe, and vertical space is the axis a card can afford to spend. */
+  const horizontal = type === 'hbar';
+  const perPage = horizontal
+    ? (narrow ? HBARS_PER_PAGE_NARROW : HBARS_PER_PAGE)
+    : (narrow ? BARS_PER_PAGE_NARROW : BARS_PER_PAGE);
+  const paged = (type === 'bar' || type === 'hbar' || type === 'stacked')
+    && data.length > perPage;
   const [page, setPage] = useState(0);
   const pageCount = paged ? Math.ceil(data.length / perPage) : 1;
   /* Clamped rather than reset: when a filter shrinks the data under the
@@ -778,9 +883,223 @@ function Plot({
     <Legend wrapperStyle={{ fontSize: 12, color: p.secondary }} />
   );
 
+  /**
+   * Pareto: share per category as bars, cumulative share as a line.
+   *
+   * BOTH MARKS ARE PERCENTAGES, on one 0-100 axis. The textbook Pareto puts
+   * counts on the left and cumulative percent on the right, and that is a
+   * dual-axis chart — the two scales can be slid against each other to make
+   * the crossover land wherever you like, so the "80% point" it appears to
+   * show is an artefact of axis choice. Normalising the bars to share removes
+   * the second axis entirely and the reading is unchanged: the bars still rank,
+   * the curve still tells you how few categories carry most of the total.
+   *
+   * Absolute values are not lost — they stay in the tooltip and in the table.
+   */
+  const paretoData = useMemo(() => {
+    if (type !== 'pareto') return null;
+    const key = series[0];
+    const sorted = [...data]
+      .map((r) => ({ row: r, v: Math.max(0, Number(r[key]) || 0) }))
+      /* A Pareto is sorted by definition. The model's ORDER BY is not to be
+         trusted with that: an unsorted "cumulative" curve wanders up and down
+         and stops meaning anything. */
+      .sort((a, b) => b.v - a.v);
+    const total = sorted.reduce((acc, e) => acc + e.v, 0);
+    if (total <= 0) return null;
+
+    /* The point of the form is the vital few, and a card cannot letter forty
+       vendor names along an axis. The tail folds into one bar — it is not
+       dropped, so the curve still reaches 100% and the total is still the real
+       total. */
+    const head = sorted.slice(0, PARETO_CATEGORIES);
+    const tail = sorted.slice(PARETO_CATEGORIES);
+    const tailValue = tail.reduce((acc, e) => acc + e.v, 0);
+
+    const bars = head.map((e) => ({ ...e.row, __v: e.v }));
+    if (tail.length) {
+      bars.push({ [x]: `Other (${tail.length})`, [key]: tailValue, __v: tailValue });
+    }
+
+    let running = 0;
+    return bars.map((r: any) => {
+      running += r.__v;
+      return { ...r, __share: (r.__v / total) * 100, __cum: (running / total) * 100 };
+    });
+  }, [type, data, series, x]);
+
   const plot = (
     <ResponsiveContainer width="100%" height={plotHeight}>
-      {type === 'line' ? (
+      {type === 'hbar' || type === 'stacked' ? (
+        /* Horizontal and stacked share a chart element; only the layout and
+           the stackId differ, so they cannot drift apart. */
+        <BarChart
+          data={view}
+          layout={type === 'hbar' ? 'vertical' : 'horizontal'}
+          margin={{ top: 8, right: 16, bottom: 4, left: 4 }}
+        >
+          <CartesianGrid
+            stroke={p.grid}
+            strokeWidth={1}
+            /* Grid lines run ACROSS the bars, never along them: a line down the
+               length of a bar invites reading its end against a rule it is
+               already touching. */
+            vertical={type === 'hbar'}
+            horizontal={type !== 'hbar'}
+          />
+          {type === 'hbar' ? (
+            <>
+              <XAxis type="number" {...axisProps} tickFormatter={compact} />
+              <YAxis
+                type="category"
+                dataKey={x}
+                {...axisProps}
+                tickFormatter={fmt.short}
+                /* The whole reason this form exists: a real gutter for the
+                   label instead of a rotation or an ellipsis. Capped so one
+                   very long name cannot squeeze the plot to nothing. */
+                width={narrow ? 96 : Math.min(190, 8 + longestLabel * 7)}
+                interval={0}
+              />
+            </>
+          ) : (
+            <>
+              <XAxis {...categoryAxis} />
+              <YAxis {...axisProps} tickFormatter={compact} width={yAxisWidth} />
+            </>
+          )}
+          <Tooltip {...sharedTooltip} cursor={{ fill: p.grid, fillOpacity: 0.35 }} />
+          {legend}
+          {series.map((y, i) => (
+            <Bar
+              key={y}
+              dataKey={y}
+              name={label(y)}
+              fill={colors[i]}
+              /* Stacked segments carry a surface-coloured gap so two adjacent
+                 fills never read as one block. */
+              stroke={type === 'stacked' ? p.surface : undefined}
+              strokeWidth={type === 'stacked' ? 2 : 0}
+              stackId={type === 'stacked' ? 'a' : undefined}
+              radius={
+                type === 'hbar'
+                  ? [0, 4, 4, 0]
+                  : type === 'stacked'
+                    ? (i === series.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0])
+                    : [4, 4, 0, 0]
+              }
+              maxBarSize={type === 'hbar' ? 26 : 44}
+              {...NO_ANIMATION}
+            />
+          ))}
+        </BarChart>
+      ) : type === 'scatter' ? (
+        <ScatterChart margin={{ top: 8, right: 20, bottom: 8, left: 4 }}>
+          <CartesianGrid stroke={p.grid} strokeWidth={1} />
+          {/* Both axes are numeric here — this is the one form that plots a
+              relationship rather than a ranking, so neither axis is a label. */}
+          <XAxis
+            type="number"
+            dataKey={x}
+            name={label(x)}
+            {...axisProps}
+            tickFormatter={compact}
+          />
+          <YAxis
+            type="number"
+            dataKey={series[0]}
+            name={label(series[0])}
+            {...axisProps}
+            tickFormatter={compact}
+            width={yAxisWidth}
+          />
+          <Tooltip
+            {...sharedTooltip}
+            cursor={{ stroke: p.axis, strokeWidth: 1, strokeDasharray: '3 3' }}
+          />
+          <Scatter
+            data={data}
+            fill={colors[0]}
+            /* A surface ring keeps overlapping points countable in a dense
+               cloud instead of merging into one shape. */
+            stroke={p.surface}
+            strokeWidth={1}
+            {...NO_ANIMATION}
+          />
+        </ScatterChart>
+      ) : type === 'pareto' && paretoData ? (
+        <ComposedChart data={paretoData} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
+          <CartesianGrid stroke={p.grid} strokeWidth={1} vertical={false} />
+          {/* A Pareto cannot page or lie down — the curve has to be read left to
+              right in one go — so the axis absorbs the label length instead.
+              Names are cut to a fixed budget and given the height that budget
+              actually needs at -35 degrees; the full value stays in the tooltip
+              and in the table. */}
+          <XAxis
+            {...categoryAxis}
+            interval={0}
+            tickFormatter={(v: any) => {
+              const t = String(fmt.short(v) ?? '');
+              return t.length > PARETO_LABEL_CHARS
+                ? `${t.slice(0, PARETO_LABEL_CHARS - 1)}\u2026`
+                : t;
+            }}
+            height={Math.min(96, 30 + PARETO_LABEL_CHARS * 3.6)}
+          />
+          {/* ONE axis, 0-100. See the note on paretoData. */}
+          <YAxis
+            {...axisProps}
+            domain={[0, 100]}
+            tickFormatter={(v: number) => `${v}%`}
+            width={yAxisWidth}
+          />
+          <Tooltip
+            {...sharedTooltip}
+            cursor={{ fill: p.grid, fillOpacity: 0.35 }}
+            formatter={(v: any, name: string) => [
+              `${Number(v).toFixed(1)}%`,
+              name,
+            ] as [string, string]}
+          />
+          {/* Above the plot, not below it: the category labels here are long
+              enough to be rotated, and a bottom legend sits directly on them. */}
+          <Legend
+            verticalAlign="top"
+            align="right"
+            wrapperStyle={{ fontSize: 12, color: p.secondary, paddingBottom: 6 }}
+          />
+          {/* 80% is the line people are looking for; drawn once, labelled, and
+              recessive so it never competes with the data. */}
+          <ReferenceLine
+            y={80}
+            stroke={p.axis}
+            strokeDasharray="4 4"
+            /* insideTopRight, not right: outside the plot it is clipped by the
+               chart margin and renders as "8C". */
+            label={{
+              value: '80%', position: 'insideTopRight',
+              fill: p.muted, fontSize: 11,
+            }}
+          />
+          <Bar
+            dataKey="__share"
+            name={`${label(series[0])} share`}
+            fill={colors[0]}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={44}
+            {...NO_ANIMATION}
+          />
+          <Line
+            type="monotone"
+            dataKey="__cum"
+            name="Cumulative"
+            stroke={colors[1] ?? p.secondary}
+            strokeWidth={2}
+            dot={false}
+            {...NO_ANIMATION}
+          />
+        </ComposedChart>
+      ) : type === 'line' ? (
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
           <CartesianGrid stroke={p.grid} strokeWidth={1} vertical={false} />
           <XAxis {...categoryAxis} />

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Conversation } from '../types';
-import { IconPin, IconPlus, IconTrash } from './icons';
+import { IconPin, IconPlus, IconTrash, IconFile } from './icons';
 
 interface Props {
   chats: Conversation[];
@@ -120,6 +120,18 @@ export function ChatList({
                 >
                   <span className="chatitem-title">{entry.chat.title}</span>
                   <span className="chatitem-meta">
+                    {/* Rendered from the count, not from a character inside the
+                        title: the paperclip belongs to the thread's state, and
+                        a title is text the user is free to rewrite. */}
+                    {!!entry.chat.attachments && (
+                      <span
+                        className="chatitem-clip"
+                        title={`${entry.chat.attachments} file${entry.chat.attachments === 1 ? '' : 's'} attached`}
+                      >
+                        <IconFile />
+                        {entry.chat.attachments > 1 && entry.chat.attachments}
+                      </span>
+                    )}
                     {entry.chat.turns} {entry.chat.turns === 1 ? 'msg' : 'msgs'} ·{' '}
                     {ago(entry.chat.updatedAt)}
                   </span>

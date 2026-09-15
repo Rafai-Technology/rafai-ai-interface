@@ -26,6 +26,20 @@
   --fast: 130ms;
   --med: 220ms;
   --slow: 380ms;
+
+  /**
+   * The reading column, shared by the conversation and the composer.
+   *
+   * It was only ever on the composer, so on a wide screen the two sat on
+   * different grids: the answer ran the full width of the workspace — about
+   * 150 characters a line at 1440px, roughly double a comfortable measure —
+   * while the input stayed a centred 860px box underneath it, and the question
+   * bubble was flung to the far right edge, a screen away from the answer it
+   * belonged to.
+   *
+   * One token, so the two can never drift apart again.
+   */
+  --column: 880px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -210,9 +224,49 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .notice button:hover { opacity: 1; }
 
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 22px 8px; }
+/* Centred on the same column as the composer below it. Charts and tables live
+   inside .answer and take the column's width, which is wider than the text
+   measure but still bounded — a 1200px bar chart is not more readable, it just
+   spreads the same twelve bars further apart. */
+.chat, .scroll > .empty { width: 100%; max-width: var(--column); margin-inline: auto; }
 
 @keyframes shimmer { 0% { opacity: 0.35; } 50% { opacity: 0.9; } 100% { opacity: 0.35; } }
 
+
+/* ------------------------------------------------- reordering a dashboard */
+/* Handle and arrows live in the panel header, revealed on hover like every
+   other per-item control here. The arrows exist because drag alone would put
+   arranging a board out of reach of anyone not using a mouse — and arranging
+   is the only way to control this layout. */
+.pnl-grip-set {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-right: 7px; flex: none;
+  opacity: 0; transition: opacity var(--fast) var(--ease);
+}
+.pnl:hover .pnl-grip-set,
+.pnl-grip-set:focus-within { opacity: 1; }
+@media (hover: none) { .pnl-grip-set { opacity: 1; } }
+
+.pnl-grip {
+  cursor: grab; user-select: none; line-height: 1;
+  font-size: 13px; color: var(--muted); padding: 2px 1px;
+  letter-spacing: -1px;
+}
+.pnl-grip:active { cursor: grabbing; }
+
+.pnl-move { display: inline-flex; gap: 1px; }
+.pnl-move button {
+  border: 0; background: none; padding: 1px 3px; border-radius: 5px;
+  font-size: 13px; line-height: 1; cursor: pointer; color: var(--muted);
+}
+.pnl-move button:hover:not(:disabled) { color: var(--text); background: var(--plane); }
+.pnl-move button:disabled { opacity: 0.3; cursor: default; }
+
+/* The card being carried, and the gap it would land in. Deliberately quiet:
+   a dashed outline and a little transparency say enough, and a dragged card
+   that changes size makes the grid reflow under the cursor. */
+.pnl.dragging { opacity: 0.45; }
+.pnl.drop-target { outline: 2px dashed var(--accent-deep); outline-offset: -2px; }
 
 /* ------------------------------------------------------- process findings */
 /* A segment, not a list: it sits apart from the prose because it is a different
@@ -698,6 +752,16 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   max-width: 220px;
 }
 .attachment-chip svg { flex: none; color: var(--muted); }
+/* The chip caps its width, so anything inside it that can grow must be told it
+   may shrink, or the name simply overflows the rounded edge. */
+.attachment-chip { overflow: hidden; }
+/* Name and extension are ONE unit. As siblings of the chip they inherited its
+   5px gap, which printed as "weekly-booking… .xlsx" — a space that reads like
+   part of the filename. */
+.attachment-chip-file {
+  display: flex; align-items: baseline; min-width: 0; gap: 0;
+}
+.attachment-chip-ext { flex: none; }
 .attachment-chip.uploading { color: var(--muted); font-style: italic; }
 /* Chip name truncates rather than stretching the chip past the composer. */
 .attachment-chip-name {
@@ -728,16 +792,58 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   margin-top: 8px; padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.22);
 }
+/* A card, not a pill: the pill had room for a clipped filename and nothing
+   else, so kind, row count and size were all thrown away at render time. */
 .question-file {
-  display: inline-flex; align-items: center; gap: 5px;
-  max-width: 220px;
-  padding: 3px 9px 3px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  font-size: 11.5px; color: #fff;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 7px;
+  /* min-width lets it shrink on a narrow column instead of forcing the bubble
+     wider; max-width stops one long name eating the whole row. */
+  min-width: 0; max-width: min(300px, 100%);
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
 }
-.question-file svg { flex: none; opacity: 0.85; }
+.question-file svg { flex: none; opacity: 0.8; }
+/* The flex item that is allowed to shrink. Without min-width: 0 a flex item
+   refuses to go below its content width and nothing ever ellipsises. */
+.question-file-text {
+  display: flex; flex-direction: column; gap: 1px; min-width: 0;
+}
+
+/* THE ACTUAL BUG THIS REPLACED:
+   text-overflow: ellipsis was set on .question-file, which is a FLEX CONTAINER.
+   text-overflow only applies to a block container overflowing its own inline
+   content, so it did nothing and the name was hard-clipped mid-character —
+   "weekly-bookings-sep2025-aug202" with no ellipsis and no extension. The
+   ellipsis has to live on the text element itself, which is what this is. */
+.question-file-name {
+  display: flex; align-items: baseline; min-width: 0;
+  font-size: 12px; line-height: 1.35;
+}
+.question-file-stem {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+/* Never shrinks: ".csv" is the most informative part of the name and is the
+   first thing lost when a filename truncates from the right. */
+.question-file-ext { flex: none; opacity: 0.9; }
+
+.question-file-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; line-height: 1.3;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Stated, not implied: the agent read part of this file, and a figure quoted
+   from it covers only that part. */
+.question-file-trunc {
+  flex: none;
+  padding: 0 5px; border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em;
+}
 
 .attachment-chip-flag {
   font-size: 10px; color: var(--warning);
@@ -774,31 +880,52 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
    header and the plot it overlapped the drawing area and read as chart
    furniture. Full width of the figure, so it looks like a deliverable rather
    than a chip that floated in. */
+/* A file the answer produced. It sits BELOW the chart, because it is an
+   outcome of the answer rather than a part of the figure — wedged between the
+   header and the plot it overlapped the drawing area and read as chart
+   furniture.
+
+   No longer a giant button: the whole card being clickable meant the only
+   affordance was the cursor, and a card that says what is inside it wants
+   selectable text. The download is its own labelled control. */
 .export-card {
-  display: flex; align-items: center; gap: 13px;
+  display: flex; align-items: center; gap: 14px;
   width: 100%;
-  margin: 14px 0 0; padding: 12px 14px;
+  margin: 16px 0 0; padding: 13px 14px;
   background: color-mix(in srgb, var(--text) 2.5%, var(--surface));
-  border: 1px solid var(--border); border-radius: 12px;
-  text-align: left; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 13px;
   transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
-.export-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--text) 22%, transparent);
-  background: color-mix(in srgb, var(--text) 4.5%, var(--surface));
-}
-.export-card:disabled { cursor: progress; }
+.export-card:hover { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.export-card.has-error { border-color: color-mix(in srgb, var(--critical) 40%, transparent); }
 
+/* Icon plus a format badge sitting on it — the extension is legible from
+   across the desk, which the filename's tail is not. */
 .export-card-icon {
-  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  /* --ink is the format's colour. Held in a custom property because the badge
+     needs it for its BACKGROUND while setting its own text colour — written as
+     `background: currentColor; color: var(--surface)` the browser resolved
+     currentColor against the colour just set on that same element, painting
+     white on white and hiding the badge entirely. */
+  --ink: var(--accent-deep);
+  position: relative; flex: none;
+  width: 42px; height: 42px; border-radius: 11px;
   display: grid; place-items: center;
-  background: color-mix(in srgb, var(--accent-deep) 12%, var(--surface));
-  color: var(--accent-deep);
+  background: color-mix(in srgb, var(--ink) 12%, var(--surface));
+  color: var(--ink);
 }
-.export-card-icon-pdf { background: color-mix(in srgb, var(--critical) 13%, var(--surface)); color: var(--critical); }
-.export-card-icon-csv { background: color-mix(in srgb, var(--good) 15%, var(--surface)); color: var(--good); }
+.export-card-icon-pdf { --ink: var(--critical); }
+.export-card-icon-csv { --ink: var(--good); }
+.export-card-badge {
+  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 2px 5px; border-radius: 4px;
+  background: var(--ink); color: #fff;
+  line-height: 1.2;
+  box-shadow: 0 0 0 2px var(--surface);
+}
 
-.export-card-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.export-card-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
 
 /* Stem truncates, extension never does — flex keeps ".pdf" pinned to the end,
    so a long report name still says what kind of file it is. */
@@ -809,27 +936,39 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .export-card-stem { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .export-card-ext { flex: none; color: var(--secondary); }
 
-.export-card-meta { font-size: 11.5px; color: var(--muted); }
+.export-card-meta {
+  font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 .export-card-meta.error { color: var(--critical); }
 
-.export-card-action {
-  flex: none; width: 30px; height: 30px; border-radius: 8px;
-  display: grid; place-items: center;
-  color: var(--muted);
-  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+.export-card-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12.5px; font-weight: 560;
+  padding: 7px 13px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
-.export-card:hover:not(:disabled) .export-card-action {
-  color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent);
+.export-card-btn:hover:not(:disabled) {
+  background: var(--plane); border-color: color-mix(in srgb, var(--text) 24%, transparent);
 }
+.export-card-btn:disabled { cursor: progress; color: var(--muted); }
 
 .export-card-spin {
-  width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--text) 20%, transparent);
-  border-top-color: var(--text);
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text) 18%, transparent);
+  border-top-color: var(--secondary);
   animation: export-spin 620ms linear infinite;
 }
 @keyframes export-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .export-card-spin { animation-duration: 2s; } }
+@media (prefers-reduced-motion: reduce) { .export-card-spin { animation-duration: 2.4s; } }
+
+@media (max-width: 560px) {
+  /* The button drops below the name rather than squeezing it to nothing. */
+  .export-card { flex-wrap: wrap; }
+  .export-card-body { flex: 1 1 100%; order: 2; }
+  .export-card-btn { order: 3; margin-left: auto; }
+}
 
 /* Attach button — same circular shape and states as the mic button beside it. */
 .attach {
@@ -1305,7 +1444,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   padding: 10px 22px 18px;
   background: linear-gradient(to top, var(--plane) 72%, transparent);
 }
-.dock .composer { max-width: 860px; margin: 0 auto; border-radius: 16px; }
+.dock .composer { max-width: var(--column); margin: 0 auto; border-radius: 16px; }
 .dock .composer textarea { min-height: 30px; font-size: 14.5px; }
 
 /* ------------------------------------------------------- sidebar collapse */
@@ -1614,9 +1753,12 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 }
 .feat-card-top {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  /* Room for the delete control, which is positioned over this corner. Without
-     it the × lands on top of the panel count. */
-  padding-right: 22px;
+  /* Room for the controls positioned over this corner — the delete, and now
+     the pin beside it. Without it they land on top of the panel count: measured
+     with one control's worth of room, the pin sat at 311-335 while the count
+     ran to 334. The count is variable width ("1 PANEL" against "8 PANELS"), so
+     reserving the space is the only version that holds for every card. */
+  padding-right: 58px;
 }
 .feat-dots { display: flex; gap: 3px; }
 .feat-dots i { width: 13px; height: 4px; border-radius: 2px; background: var(--accent-deep); opacity: 0.34; }
@@ -1628,6 +1770,21 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .feat-foot { display: flex; gap: 5px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* Pin sits left of the delete, and — unlike delete — stays visible once it is
+   ON: a pinned board should look pinned when nothing is hovering it. */
+.feat-pin {
+  position: absolute; top: 9px; right: 37px;
+  width: 24px; height: 24px; border: 0; padding: 0;
+  display: grid; place-items: center;
+  background: none; color: var(--muted); cursor: pointer;
+  border-radius: 7px; opacity: 0;
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.feat-cell:hover .feat-pin, .feat-pin:focus-visible { opacity: 1; }
+.feat-pin.on { opacity: 1; color: var(--accent-deep); }
+.feat-pin:hover { background: var(--plane); color: var(--text); }
+.feat-cell:has(.feat-pin.on) .feat-name { font-weight: 620; }
 
 .feat-del {
   position: absolute; top: 9px; right: 9px; width: 24px; height: 24px; border: 0;
@@ -2049,3 +2206,13 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   animation: spin 700ms linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { .chatlist-spinner { animation: none; } }
+
+/* Paperclip on a thread that carries files. Sits in the meta row rather than
+   before the title, so it never eats characters the title needs — the title's
+   whole job in this list is telling two threads apart. */
+.chatitem-clip {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-right: 5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chatitem-clip svg { width: 11px; height: 11px; }

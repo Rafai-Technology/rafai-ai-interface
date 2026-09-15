@@ -40,7 +40,22 @@ async function json<T>(res: Response): Promise<T> {
     }
     throw new Error(message || `Request failed (${res.status})`);
   }
-  return res.json() as Promise<T>;
+  /**
+   * A successful response with no body is a success, not a parse error.
+   *
+   * PUT /dashboards/:id/panels replaces the panels and returns 204 No Content,
+   * which is correct — there is nothing to send back. Calling res.json() on it
+   * throws "Failed to fetch", and the caller, seeing a rejected promise, undoes
+   * the change it had just made optimistically. Reordering a dashboard looked
+   * like it silently refused, while the server had already saved it.
+   *
+   * Checked on the body rather than only on 204, because a 200 with an empty
+   * body fails in exactly the same way.
+   */
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export async function listRoles(): Promise<RoleInfo[]> {
@@ -320,6 +335,17 @@ export async function getDashboard(id: string): Promise<DashboardDefinition> {
   return json<DashboardDefinition>(res);
 }
 
+/** Moves panels. Positions only — no SQL is re-validated, so a viewer can
+ *  arrange a board they would not be allowed to author. */
+export async function reorderDashboardPanels(id: string, order: string[]): Promise<void> {
+  const res = await fetch(url(`/dashboards/${id}/panels/order`), {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ order }),
+  });
+  await json<{ ok: boolean }>(res);
+}
+
 /** Replaces the panels — how a saved query gets corrected. */
 export async function updateDashboardPanels(
   id: string,
@@ -331,6 +357,15 @@ export async function updateDashboardPanels(
     body: JSON.stringify({ panels }),
   });
   return json<{ id: string; panels: number }>(res);
+}
+
+export async function setDashboardPinned(id: string, pinned: boolean): Promise<void> {
+  const res = await fetch(url(`/dashboards/${id}`), {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  });
+  await json<{ ok: boolean }>(res);
 }
 
 export async function renameDashboard(id: string, title: string): Promise<void> {

@@ -14,6 +14,14 @@ export interface ParsedAnswer {
  * returns the data — the numbers come from the trace, so nothing plotted here
  * has passed back through the model.
  */
+/** Every form the renderer can draw from a model-supplied spec. 'forecast' is
+ *  deliberately absent: it is derived from a run_forecast trace step, never
+ *  requested, so accepting it here would let a spec claim an interval that was
+ *  never computed. */
+const CHART_TYPES = new Set<ChartSpec['type']>([
+  'bar', 'hbar', 'line', 'stacked', 'pie', 'scatter', 'pareto',
+]);
+
 export function parseAnswer(answer: string): ParsedAnswer {
   let chart: ChartSpec | null = null;
   let text = answer;
@@ -30,7 +38,16 @@ export function parseAnswer(answer: string): ParsedAnswer {
     if (!spec || typeof spec.x !== 'string' || !spec.y) continue;
 
     chart = {
-      type: spec.type === 'line' || spec.type === 'pie' ? spec.type : 'bar',
+      /* An allowlist, not a pass-through: the model is free to invent a type
+         name, and an unknown one must land on a form that always renders
+         rather than on an empty card. Everything unrecognised becomes a bar,
+         which is the safe default for "magnitude across categories".
+
+         This list has to be kept in step with ChartSpec. It silently pinned
+         every answer to bar/line/pie for as long as it said only those three —
+         stacked, pareto and scatter specs parsed fine and were then thrown
+         away one line later. */
+      type: CHART_TYPES.has(spec.type) ? spec.type : 'bar',
       x: spec.x,
       y: Array.isArray(spec.y) ? spec.y : [spec.y].filter(Boolean),
       title: spec.title,

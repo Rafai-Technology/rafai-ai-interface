@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { useSpeechInput } from '../hooks/useSpeechInput';
 import type { Attachment } from '../types';
 import { IconAttach, IconClose, IconFile, IconMic, IconSend, IconStop } from './icons';
+import { splitFilename } from '../format';
 
 interface Props {
   value: string;
@@ -71,7 +72,10 @@ export const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer
               title={`${a.filename} · ${formatBytes(a.bytes)}${a.truncated ? ' · shown up to the size cap' : ''}`}
             >
               <IconFile />
-              <span className="attachment-chip-name">{a.filename}</span>
+              <span className="attachment-chip-file">
+                <span className="attachment-chip-name">{splitFilename(a.filename).stem}</span>
+                <span className="attachment-chip-ext">{splitFilename(a.filename).ext}</span>
+              </span>
               {a.truncated && <span className="attachment-chip-flag">truncated</span>}
               {onRemoveAttachment && (
                 <button
