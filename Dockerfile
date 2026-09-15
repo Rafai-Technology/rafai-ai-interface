@@ -22,6 +22,9 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 #   docker run --env-file brands/acme.env -e AGENT_URL=... rafai-web
 # See README "White-label".
 COPY --chmod=755 brand.sh /docker-entrypoint.d/40-brand.sh
+# Every brand's images, OUTSIDE the web root. brand.sh copies in only the ones
+# the container's brand names: /brands/cts/logo.png is brands/cts/logo.png.
+COPY --from=build /app/brands /usr/share/nginx/brands
 ENV AGENT_URL=http://agent:3000
 # Keeps nginx's own $variables from being eaten by envsubst.
 ENV DOLLAR=$

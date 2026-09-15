@@ -63,7 +63,8 @@ the customer's wordmark, not Rafai's logo. With nothing set, it is Rafai.
 
 **Values.** Colours as `6d28d9` or `#6d28d9`, and prefer no `#`: in a `.env`
 file an unquoted `#` starts a comment and the value arrives empty. Images as
-`https://…`, a `/path` served by this site, or a `data:image` URL. `http://`,
+`/brands/<name>/<file>` from this repo (see below), `https://…`, another
+`/path` served by this site, or a `data:image` URL. `http://`,
 `//host`, and anything with a space, quote or backslash in it are refused.
 
 **Not brandable, on purpose:** page backgrounds, text greys and borders, which
@@ -93,15 +94,17 @@ the brand is rebuilt from those alone — not merged with anything baked in at
 build time. If none is, the built `brand.js` is kept. `/brand.js` is served
 `no-cache`, so a restart with new values reaches browsers straight away.
 
-**Logo files.** Mount them rather than pointing at another site. An `https://`
-logo is fetched from that host by every user's browser, which a network with
-no internet access cannot do:
+**Logo files.** Keep them in this repo, in `brands/<name>/`, and name them by
+their path on the site: `BRAND_LOGO_URL=/brands/acme/logo.png`. The build, or
+the container at start, copies in only the files the brand names — never the
+whole folder — so one customer's site does not also serve every other
+customer's logo. A named file that is not there stops the build; a container
+warns and shows the name instead. `brands/cts/` is a complete example: the
+artwork as supplied (`source.png`), the sidebar logo and a dark-theme variant,
+and the tab icon.
 
-```bash
-docker run --env-file brands/acme.env \
-  -v ./acme-logo.svg:/usr/share/nginx/html/brand/acme-logo.svg:ro \
-  -e BRAND_LOGO_URL=/brand/acme-logo.svg -p 8080:80 rafai-web
-```
+Prefer this to an `https://` logo, which every user's browser fetches from that
+host — something a network with no internet access cannot do.
 
 ### When a value is wrong
 

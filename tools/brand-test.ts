@@ -18,7 +18,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -311,6 +311,32 @@ it('an unwritable web root is warned about, and the container still starts', () 
   chmodSync(dir, 0o755);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /not writable/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+it('images under /brands/ are copied in — only the ones the brand names', () => {
+  const dir = scratch();
+  const assets = join(dir, 'brands-src');
+  for (const name of ['acme/logo.png', 'acme/icon.png', 'other/logo.png']) {
+    mkdirSync(join(assets, dirname(name)), { recursive: true });
+    writeFileSync(join(assets, name), name);
+  }
+  const web = join(dir, 'html');
+  mkdirSync(join(web, 'brands', 'stale'), { recursive: true });
+  const r = runLocal({
+    BRAND_NAME: 'Acme',
+    BRAND_LOGO_URL: '/brands/acme/logo.png',
+    BRAND_LOGO_DARK_URL: '/brands/acme/missing.png',
+    BRAND_FAVICON_URL: '/brands/acme/../other/logo.png',
+    BRAND_ASSETS_DIR: assets,
+  }, join(web, 'brand.js'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(web, 'brands', 'acme', 'logo.png'), 'utf8'), 'acme/logo.png');
+  assert.equal(existsSync(join(web, 'brands', 'acme', 'icon.png')), false);
+  assert.equal(existsSync(join(web, 'brands', 'other')), false);
+  assert.equal(existsSync(join(web, 'brands', 'stale')), false);
+  assert.match(r.stderr, /no acme\/missing\.png/);
+  assert.match(r.stderr, /not copying \/brands\/acme\/\.\.\/other\/logo\.png/);
   rmSync(dir, { recursive: true, force: true });
 });
 

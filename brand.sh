@@ -21,8 +21,13 @@
 # back, rather than refusing to start: a typo in a colour should not take a
 # customer's site down. It will be in the container log.
 #
+# An image given as /brands/<name>/<file> is that file from the repo's brands/
+# folder, which the image keeps OUTSIDE the web root (BRAND_ASSETS_DIR,
+# /usr/share/nginx/brands). Only the files this brand names are copied in, so a
+# customer's site serves its own logo and not every customer's.
+#
 # BRAND_JS_PATH=- prints the file instead of writing it (for inspection and
-# for the tests), and skips the keep-the-built-file checks.
+# for the tests), and skips the keep-the-built-file checks and the copying.
 set -eu
 
 # Character classes below are ASCII rules. Without this they change meaning
@@ -32,6 +37,7 @@ export LC_ALL=C
 out="${BRAND_JS_PATH:-/usr/share/nginx/html/brand.js}"
 names="BRAND_NAME BRAND_COMPANY BRAND_TAGLINE BRAND_LOGO_URL BRAND_LOGO_DARK_URL BRAND_FAVICON_URL BRAND_ACCENT BRAND_ACCENT_DARK BRAND_BAR BRAND_SIDEBAR BRAND_SIDEBAR_DARK"
 body=""
+assets=""
 
 warn() { printf 'brand: %s\n' "$*" >&2; }
 
@@ -81,6 +87,7 @@ url() {
   esac
   if printf '%s' "$v" | grep -Eq '^(https://.+|/[^/].*|data:image/[a-zA-Z0-9.+-]+[;,].*)$'; then
     put "$1" "$v"
+    case "$v" in /brands/*) assets="$assets $v" ;; esac
   else
     warn "ignoring $3=\"$v\": use https://..., a /path on this site, or a data:image URL"
   fi
@@ -134,5 +141,21 @@ if ! printf '%s\n' "$payload" > "$tmp" 2>/dev/null; then
   exit 0
 fi
 mv "$tmp" "$out"
+
+# The brand's images. Whatever a previous start copied goes first: runtime
+# replaces build, and a logo the brand no longer names should stop being served.
+# A missing file is warned about; the page falls back to the name.
+src_root="${BRAND_ASSETS_DIR:-/usr/share/nginx/brands}"
+web_root=$(dirname "$out")
+rm -rf "$web_root/brands"
+for a in $assets; do
+  if ! printf '%s' "$a" | grep -Eq '^/brands/[a-z0-9-]+/[a-zA-Z0-9_-][a-zA-Z0-9._-]*$'; then
+    warn "not copying $a: expected /brands/<name>/<file>"
+  elif [ ! -f "$src_root/${a#/brands/}" ]; then
+    warn "$a: there is no ${a#/brands/} in $src_root"
+  elif ! { mkdir -p "$web_root$(dirname "$a")" && cp "$src_root/${a#/brands/}" "$web_root$a"; } 2>/dev/null; then
+    warn "could not copy $a into $web_root"
+  fi
+done
 name=$(clean "${BRAND_NAME:-}")
 printf 'brand: wrote %s (%s)\n' "$out" "${name:-no name set}"

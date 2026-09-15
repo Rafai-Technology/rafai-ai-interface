@@ -11,3 +11,6 @@ dist
 .vite.pid
 *.tsbuildinfo
 .git
+
+# A brand's artwork as supplied. Only the logos and icons made from it are served.
+brands/*/source.*
