@@ -1,3 +1,5 @@
+import { BRAND } from './brand';
+
 /** A file this many rows or fewer downloads whole; past it, only the first
  *  MAX_EXPORT_ROWS are written and the file says so. The trace itself is
  *  already capped (TRACE_ROW_CAP on the server), so this rarely bites — it
@@ -16,6 +18,16 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/* The name for a file whose title has no Latin letters in it — a Hindi chart
+   title slugs to nothing. It was "rafai-export" on every deployment; it is now
+   named after the brand, and a brand name that ALSO slugs to nothing gives
+   plain "export". Worked out here rather than through slug(), which falls back
+   to this very value. */
+const EXPORT_FALLBACK = (() => {
+  const base = BRAND.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return base ? `${base}-export` : 'export';
+})();
+
 /** A filename-safe slug, so a chart titled "Top customers by revenue?" does
  *  not fight the OS over ':' or '?' in the saved file's name. Exported so the
  *  UI can show the exact filename on a download card before it is built. */
@@ -25,7 +37,7 @@ export function slug(title: string): string {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'rafai-export'
+      .slice(0, 60) || EXPORT_FALLBACK
   );
 }
 
@@ -209,7 +221,7 @@ export async function exportAsPdf(opts: {
   doc.setFontSize(8.5);
   doc.setTextColor(130);
   doc.text(
-    `Rafai AI · generated ${new Date().toLocaleString('en-IN')}` +
+    `${BRAND.name} · generated ${new Date().toLocaleString('en-IN')}` +
       (provenance?.role ? ` · role: ${provenance.role.replace(/_/g, ' ')}` : ''),
     margin,
     53,

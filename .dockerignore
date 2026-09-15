@@ -1,0 +1,13 @@
+# The build stage runs `npm ci` and then `COPY . .`. Without this file the copy
+# drops the host's node_modules over the Linux install — native binaries built
+# for macOS — and `vite build` fails inside the container. It also copied .env
+# into the image, which is how a local brand or API URL got baked in by accident.
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.log
+.vite.pid
+*.tsbuildinfo
+.git

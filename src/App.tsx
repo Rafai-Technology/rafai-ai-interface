@@ -5,6 +5,7 @@ import {
   listAttachments, recoverAskResult, setPinned,
   listRoles, schema, switchRole, uploadAttachment,
 } from './api';
+import { BRAND } from './brand';
 import { useTheme } from './theme';
 import type { Attachment, Conversation, HistoryTurn, RoleInfo, Turn } from './types';
 import { ChatPanel } from './components/ChatPanel';
@@ -552,6 +553,7 @@ export default function App() {
         loadingMore={chatsLoading}
         onTogglePin={togglePin}
         onDeleteChat={removeChat}
+        mode={mode}
       />
 
       <div className="workspace">
@@ -566,7 +568,7 @@ export default function App() {
             <IconPanel />
           </button>
           <div className="topbar-title">
-            <h1>Rafai AI</h1>
+            <h1>{BRAND.name}</h1>
             <p>
               Ask in plain English. Answers come only from the views this
               login is granted, and every query is shown.
@@ -636,7 +638,7 @@ export default function App() {
             /* Nothing asked yet: the input is the page, not a strip pinned to
                the bottom edge. It docks down once a conversation starts. */
             <div className="hero">
-              <h2 className="hero-title">Ask Rafai AI about your operations.</h2>
+              <h2 className="hero-title">Ask {BRAND.name} about your operations.</h2>
               <p className="hero-sub">
                 Answers come only from the views this role is allowed to read.
                 Every query is shown, and anything outside the role's access is

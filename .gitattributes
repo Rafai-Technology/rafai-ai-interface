@@ -1,0 +1,3 @@
+# brand.sh runs under busybox inside the container. Checked out with CRLF line
+# endings, its shebang becomes "/bin/sh\r" and the container's entrypoint skips it.
+*.sh text eol=lf

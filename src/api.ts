@@ -15,8 +15,12 @@ const TOKEN_KEY = 'rafai-ai-token';
  * service — the backend must then allow that origin in CORS_ORIGINS.
  *
  * Trailing slashes are trimmed so a value of "https://x/" cannot produce "//".
+ *
+ * `||`, not `??`: the Dockerfile declares the variable with an empty default,
+ * and an empty string survives `??` — every request then went to /auth/...
+ * instead of /api/auth/... and the containerised app could not sign in.
  */
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/+$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
 
 /** Build a URL against the configured API base. */
 function url(path: string): string {

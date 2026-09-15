@@ -16,6 +16,12 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # so AGENT_URL is a RUNTIME setting here — unlike VITE_API_BASE_URL, one image
 # can be pointed at different services per environment.
 COPY nginx.conf /etc/nginx/templates/default.conf.template
+# The brand is a RUNTIME setting too. nginx:alpine runs every executable
+# /docker-entrypoint.d/*.sh before it starts, and this one rewrites /brand.js
+# from the container's BRAND_* variables — so one image serves every customer:
+#   docker run --env-file brands/acme.env -e AGENT_URL=... rafai-web
+# See README "White-label".
+COPY --chmod=755 brand.sh /docker-entrypoint.d/40-brand.sh
 ENV AGENT_URL=http://agent:3000
 # Keeps nginx's own $variables from being eaten by envsubst.
 ENV DOLLAR=$
