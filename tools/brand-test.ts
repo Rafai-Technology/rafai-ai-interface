@@ -23,7 +23,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BRAND_ENV, BRAND_FIELDS, DEFAULT_BRAND, brandScript, contrast, onColour, readBrandEnv, resolveBrand,
+  BRAND_ENV, BRAND_FIELDS, DEFAULT_BRAND, HEAD_END, HEAD_START, brandHead, brandScript, contrast, onColour,
+  readBrandEnv, resolveBrand,
 } from '../src/brand-schema.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -266,6 +267,39 @@ it('the build writes the same file shape the shell does', () => {
   assert.equal(brandScript(readBrandEnv(env).values).trim(), runLocal(env).stdout.trim());
 });
 
+/* ------------------------------------------------------------ link preview */
+
+const HEAD_CASES: Record<string, Record<string, string>> = {
+  ...PARITY,
+  'share image and site': {
+    BRAND_NAME: 'Acme', BRAND_LOGO_URL: '/brands/acme/logo.png',
+    BRAND_SHARE_IMAGE_URL: '/brands/acme/share.png', BRAND_SITE_URL: 'https://ai.acme.com/',
+  },
+  'markup in a name is escaped': { BRAND_NAME: '<b>"A&B"</b>', BRAND_TAGLINE: "Ops'" },
+  'an inline icon is no preview image': { BRAND_NAME: 'Acme', BRAND_FAVICON_URL: 'data:image/png;base64,AAAA' },
+  'a bad share image and site are dropped': { BRAND_NAME: 'Acme', BRAND_SHARE_IMAGE_URL: 'data:image/png;base64,AA', BRAND_SITE_URL: 'http://acme.com' },
+};
+
+for (const [name, env] of Object.entries(HEAD_CASES)) {
+  it(`preview tags, shell matches the build: ${name}`, () => {
+    const r = runLocal({ ...env, BRAND_HTML_PATH: '-' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, brandHead(env).html);
+  });
+}
+
+it('a customer link preview never shows Rafai', () => {
+  for (const env of [{ BRAND_NAME: 'Acme' }, { BRAND_COMPANY: 'Acme' }, { BRAND_LOGO_URL: '/brands/acme/logo.png' }]) {
+    assert.ok(!/rafai/i.test(brandHead(env).html), JSON.stringify(env));
+  }
+});
+
+it('the preview image is absolute when a site is given, and escaped', () => {
+  const { html } = brandHead(HEAD_CASES['share image and site']);
+  assert.match(html, /og:image" content="https:\/\/ai\.acme\.com\/brands\/acme\/share\.png"/);
+  assert.match(brandHead(HEAD_CASES['markup in a name is escaped']).html, /<title>&lt;b&gt;&quot;A&amp;B&quot;/);
+});
+
 /* ------------------------------------------------------------ container */
 
 function scratch(): string {
@@ -337,6 +371,18 @@ it('images under /brands/ are copied in — only the ones the brand names', () =
   assert.equal(existsSync(join(web, 'brands', 'stale')), false);
   assert.match(r.stderr, /no acme\/missing\.png/);
   assert.match(r.stderr, /not copying \/brands\/acme\/\.\.\/other\/logo\.png/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+it('index.html: the brand block is replaced, the rest of the page kept', () => {
+  const dir = scratch();
+  const page = ['<html><head>', HEAD_START, '<title>Built</title>', HEAD_END, '<script src="/x.js"></script>', '</head></html>', ''].join(NL);
+  writeFileSync(join(dir, 'index.html'), page);
+  const env = { BRAND_NAME: 'Acme', BRAND_SHARE_IMAGE_URL: '/brands/acme/share.png' };
+  const r = runLocal(env, join(dir, 'brand.js'));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, 'index.html'), 'utf8'),
+    ['<html><head>', HEAD_START, brandHead(env).html, HEAD_END, '<script src="/x.js"></script>', '</head></html>', ''].join(NL));
   rmSync(dir, { recursive: true, force: true });
 });
 

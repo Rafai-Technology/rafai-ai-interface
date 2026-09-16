@@ -187,6 +187,82 @@ export function readBrandEnv(env: Record<string, string | undefined>): {
   return { values, errors };
 }
 
+/* ------------------------------------------------------------------ head */
+
+/** Where index.html's brand block starts and ends. brand.sh replaces between them too. */
+export const HEAD_START = '<!-- brand:head -->';
+export const HEAD_END = '<!-- /brand:head -->';
+
+const html = (text: string) =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/**
+ * The title, icon and link-preview tags, written into index.html itself.
+ *
+ * WhatsApp, Slack, Teams and iMessage build a shared link's card from the raw
+ * HTML and never run brand.js, so without this every customer's link showed
+ * Rafai's icon (or none) whatever the app itself looked like.
+ *
+ * Deliberately simpler than resolveBrand() — no clipping, no generated
+ * monogram — because brand.sh must produce the identical block in shell and
+ * tools/brand-test.ts compares the two byte for byte. The app re-applies the
+ * full brand in the browser, so only the crawler ever reads just this.
+ *
+ * Two variables exist for the head alone and are not part of window.__BRAND__:
+ *   BRAND_SHARE_IMAGE_URL  the preview image; ~1200x630 reads best. Falls back
+ *                          to the logo, then the icon.
+ *   BRAND_SITE_URL         https://your.domain — crawlers want an absolute
+ *                          og:image, and a /path is made absolute with it.
+ */
+export function brandHead(env: Record<string, string | undefined>): {
+  html: string;
+  errors: string[];
+  /** The share image when it is a /brands/ file the build must copy in. */
+  shareImage: string | null;
+} {
+  const { values, errors } = readBrandEnv(env);
+  const extra = (name: string, httpsOnly: boolean): string | undefined => {
+    const raw = env[name];
+    const value = raw === undefined ? '' : clean(raw);
+    if (!value) return undefined;
+    const result = check('url', value);
+    if (result.ok && (!httpsOnly || /^https:\/\/[^/]/.test(value)) && !value.startsWith('data:')) return value;
+    errors.push(`${name}="${shown(value)}": ${httpsOnly ? 'use https://your.domain' : 'use https://... or a /path on this site'}`);
+    return undefined;
+  };
+  const share = extra('BRAND_SHARE_IMAGE_URL', false);
+  const site = extra('BRAND_SITE_URL', true)?.replace(/\/+$/, '');
+
+  const customised = IDENTITY.some((field) => values[field] !== undefined);
+  const name = values.name ?? values.company ?? (customised ? 'AI Assistant' : DEFAULT_BRAND.name);
+  const company = values.company ?? (customised ? name : DEFAULT_BRAND.company);
+  const description = `${values.tagline ?? DEFAULT_BRAND.tagline} assistant for ${company}`;
+  const icon = values.favicon ?? values.logo ?? (customised ? '' : DEFAULT_BRAND.favicon);
+  const inline = (url: string) => url.startsWith('data:');
+  const image = [share, values.logo, values.favicon, customised ? undefined : DEFAULT_BRAND.logo]
+    .find((url): url is string => !!url && !inline(url)) ?? '';
+  const absolute = (url: string) => (site && url.startsWith('/') ? `${site}${url}` : url);
+
+  const tags = [
+    `<title>${html(name)}</title>`,
+    `<meta name="description" content="${html(description)}" />`,
+    ...(icon ? [`<link rel="icon" href="${html(icon)}" />`] : []),
+    ...(icon && !inline(icon) ? [`<link rel="apple-touch-icon" href="${html(absolute(icon))}" />`] : []),
+    '<meta property="og:type" content="website" />',
+    `<meta property="og:site_name" content="${html(name)}" />`,
+    `<meta property="og:title" content="${html(name)}" />`,
+    `<meta property="og:description" content="${html(description)}" />`,
+    ...(image ? [`<meta property="og:image" content="${html(absolute(image))}" />`] : []),
+    `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+  ];
+  return {
+    html: tags.join(String.fromCharCode(10)),
+    errors,
+    shareImage: share?.startsWith('/brands/') ? share : null,
+  };
+}
+
 /** The exact file /brand.js carries. brand.sh writes the same shape in shell. */
 export function brandScript(values: Partial<Record<keyof Brand, string>>): string {
   return `window.__BRAND__ = ${JSON.stringify(values)};` + String.fromCharCode(10);

@@ -77,6 +77,16 @@ colour() {
 # https, a same-origin /path (not //host), or an inline image. Printable ASCII
 # only, and never a quote or a backslash — "/\evil.com/x" is a path to a browser
 # only until it resolves it to https://evil.com/x.
+# okurl prints the cleaned value when it passes and nothing when it does not;
+# url() is the same check, warned about and carried into brand.js.
+okurl() {
+  v=$(clean "$1")
+  case "$v" in ''|*[!!-~]*|*\"*|*\\*) return 0 ;; esac
+  if printf '%s' "$v" | grep -Eq '^(https://.+|/[^/].*|data:image/[a-zA-Z0-9.+-]+[;,].*)$'; then
+    printf '%s' "$v"
+  fi
+}
+
 url() {
   v=$(clean "$2")
   [ -n "$v" ] || return 0
@@ -85,12 +95,66 @@ url() {
       warn "ignoring $3: spaces, quotes, backslashes and non-ASCII are not allowed in a URL"
       return 0 ;;
   esac
-  if printf '%s' "$v" | grep -Eq '^(https://.+|/[^/].*|data:image/[a-zA-Z0-9.+-]+[;,].*)$'; then
+  if [ -n "$(okurl "$v")" ]; then
     put "$1" "$v"
     case "$v" in /brands/*) assets="$assets $v" ;; esac
   else
     warn "ignoring $3=\"$v\": use https://..., a /path on this site, or a data:image URL"
   fi
+}
+
+# Escaped for an HTML attribute or text. & first, or it escapes the others twice.
+h() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+                         -e 's/"/\&quot;/g' -e "s/'/\\&#39;/g"
+}
+
+# The title, icon and link-preview tags for index.html. Mirrors brandHead() in
+# src/brand-schema.ts, which tools/brand-test.ts compares byte for byte.
+# WhatsApp, Slack and Teams read these from the raw HTML and never run
+# brand.js, so without it a container kept the BUILD's preview.
+head_block() {
+  n=$(clean "${BRAND_NAME:-}"); c=$(clean "${BRAND_COMPANY:-}"); tg=$(clean "${BRAND_TAGLINE:-}")
+  lo=$(okurl "${BRAND_LOGO_URL:-}"); ld=$(okurl "${BRAND_LOGO_DARK_URL:-}"); fv=$(okurl "${BRAND_FAVICON_URL:-}")
+  customised=""
+  if [ -n "$n$c$lo$ld$fv" ]; then customised=1; fi
+
+  sh_=$(okurl "${BRAND_SHARE_IMAGE_URL:-}")
+  raw=$(clean "${BRAND_SHARE_IMAGE_URL:-}")
+  case "$sh_" in data:*) sh_="" ;; esac
+  if [ -n "$raw" ] && [ -z "$sh_" ]; then warn "ignoring BRAND_SHARE_IMAGE_URL=\"$raw\": use https://... or a /path on this site"; fi
+  site=$(okurl "${BRAND_SITE_URL:-}")
+  raw=$(clean "${BRAND_SITE_URL:-}")
+  if ! printf '%s' "$site" | grep -Eq '^https://[^/]'; then site=""; fi
+  if [ -n "$raw" ] && [ -z "$site" ]; then warn "ignoring BRAND_SITE_URL=\"$raw\": use https://your.domain"; fi
+  site=$(printf '%s' "$site" | sed -e 's:/*$::')
+
+  if [ -n "$n" ]; then name="$n"; elif [ -n "$c" ]; then name="$c"; elif [ -n "$customised" ]; then name="AI Assistant"; else name="Rafai AI"; fi
+  if [ -n "$c" ]; then company="$c"; elif [ -n "$customised" ]; then company="$name"; else company="Rafai Technologies"; fi
+  desc="${tg:-Analytics} assistant for $company"
+  if [ -n "$fv" ]; then icon="$fv"; elif [ -n "$lo" ]; then icon="$lo"; elif [ -n "$customised" ]; then icon=""; else icon="/rafai-logo.png"; fi
+  image=""
+  for cand in "$sh_" "$lo" "$fv" "$([ -n "$customised" ] || printf '/rafai-logo.png')"; do
+    case "$cand" in ''|data:*) continue ;; esac
+    image="$cand"; break
+  done
+  abs() { case "$1" in /*) printf '%s%s' "$site" "$1" ;; *) printf '%s' "$1" ;; esac; }
+
+  printf '<title>%s</title>\n' "$(h "$name")"
+  printf '<meta name="description" content="%s" />\n' "$(h "$desc")"
+  if [ -n "$icon" ]; then printf '<link rel="icon" href="%s" />\n' "$(h "$icon")"; fi
+  case "$icon" in ''|data:*) ;; *) printf '<link rel="apple-touch-icon" href="%s" />\n' "$(h "$(abs "$icon")")" ;; esac
+  printf '<meta property="og:type" content="website" />\n'
+  printf '<meta property="og:site_name" content="%s" />\n' "$(h "$name")"
+  printf '<meta property="og:title" content="%s" />\n' "$(h "$name")"
+  printf '<meta property="og:description" content="%s" />\n' "$(h "$desc")"
+  if [ -n "$image" ]; then
+    printf '<meta property="og:image" content="%s" />\n' "$(h "$(abs "$image")")"
+    printf '<meta name="twitter:card" content="summary_large_image" />'
+  else
+    printf '<meta name="twitter:card" content="summary" />'
+  fi
+  case "$sh_" in /brands/*) assets="$assets $sh_" ;; esac
 }
 
 if [ "$out" != "-" ]; then
@@ -128,6 +192,12 @@ colour sidebarDark "${BRAND_SIDEBAR_DARK:-}"  BRAND_SIDEBAR_DARK
 
 payload=$(printf 'window.__BRAND__ = {%s};' "$body")
 
+# BRAND_HTML_PATH=- prints the head block instead, for the tests.
+if [ "${BRAND_HTML_PATH:-}" = "-" ]; then
+  head_block
+  exit 0
+fi
+
 if [ "$out" = "-" ]; then
   printf '%s\n' "$payload"
   exit 0
@@ -141,6 +211,24 @@ if ! printf '%s\n' "$payload" > "$tmp" 2>/dev/null; then
   exit 0
 fi
 mv "$tmp" "$out"
+
+# The same brand into index.html's head, between the markers the build left.
+# Anything wrong here is a warning: the app still brands itself in the browser.
+html="${BRAND_HTML_PATH:-$(dirname "$out")/index.html}"
+block="$html.block.$$"
+head_block > "$block"
+if [ ! -f "$html" ] || ! grep -q '<!-- brand:head -->' "$html"; then
+  warn "$html has no <!-- brand:head --> block, link previews keep the build's brand"
+elif awk -v f="$block" '
+    index($0, "<!-- brand:head -->") { print; while ((getline l < f) > 0) print l; skip = 1; next }
+    index($0, "<!-- /brand:head -->") { skip = 0 }
+    !skip { print }' "$html" > "$html.tmp.$$" 2>/dev/null; then
+  mv "$html.tmp.$$" "$html"
+else
+  rm -f "$html.tmp.$$"
+  warn "could not write $html, link previews keep the build's brand"
+fi
+rm -f "$block"
 
 # The brand's images. Whatever a previous start copied goes first: runtime
 # replaces build, and a logo the brand no longer names should stop being served.

@@ -51,6 +51,8 @@ optional, and `brands/example.env` is a complete, commented customer file.
 | `BRAND_LOGO_URL` | Sidebar logo, any aspect ratio | The name, set as a wordmark |
 | `BRAND_LOGO_DARK_URL` | Sidebar logo on the dark theme | `BRAND_LOGO_URL` |
 | `BRAND_FAVICON_URL` | Browser tab icon | `BRAND_LOGO_URL`, else a monogram of the name |
+| `BRAND_SHARE_IMAGE_URL` | The picture in a shared link's preview (WhatsApp, Slack, Teams); ~1200×630 | `BRAND_LOGO_URL`, else `BRAND_FAVICON_URL` |
+| `BRAND_SITE_URL` | Makes the preview image an absolute URL, which crawlers need | On Vercel, the production domain; elsewhere a relative path |
 | `BRAND_ACCENT` | Buttons, links, tabs, focus rings, the question bubble | Rafai teal |
 | `BRAND_ACCENT_DARK` | The same, on the dark theme | `BRAND_ACCENT` |
 | `BRAND_BAR` | The rule across the top | `BRAND_ACCENT` |

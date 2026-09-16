@@ -2,9 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { BRAND_ENV, brandScript, readBrandEnv, resolveBrand } from './src/brand-schema';
-
-const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+import { BRAND_ENV, HEAD_END, HEAD_START, brandHead, brandScript, readBrandEnv, resolveBrand } from './src/brand-schema';
 
 /**
  * White-label: /brand.js from the BRAND_* variables. See src/brand-schema.ts
@@ -29,7 +27,7 @@ const BRAND_ASSET = /^\/brands\/[a-z0-9-]+\/[a-zA-Z0-9_-][a-zA-Z0-9._-]*$/;
 
 function brandPlugin(): Plugin {
   let script = brandScript({});
-  let title = resolveBrand({}).brand.name;
+  let head = brandHead({}).html;
   let base = '/';
   let assets = new Map<string, string>();
   return {
@@ -37,23 +35,32 @@ function brandPlugin(): Plugin {
     configResolved(config) {
       base = config.base;
       const env = loadEnv(config.mode, config.envDir || config.root, 'BRAND_');
-      const { values, errors } = readBrandEnv(env);
+      const { values } = readBrandEnv(env);
+      /* Crawlers want an absolute og:image. Vercel exposes the production
+         domain at build time, so a Vercel deploy needs no BRAND_SITE_URL. */
+      const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+      const headEnv = { ...env, BRAND_SITE_URL: env.BRAND_SITE_URL ?? (vercel ? `https://${vercel}` : undefined) };
+      const built = brandHead(headEnv);
+      const errors = built.errors;
       assets = new Map();
-      for (const field of ['logo', 'logoDark', 'favicon'] as const) {
-        const url = values[field];
+      const images: [string, string | null | undefined][] = [
+        ...(['logo', 'logoDark', 'favicon'] as const).map((f) => [BRAND_ENV[f], values[f]] as [string, string | undefined]),
+        ['BRAND_SHARE_IMAGE_URL', built.shareImage],
+      ];
+      for (const [name, url] of images) {
         if (!url?.startsWith('/brands/')) continue;
         const file = join(config.root, url);
-        if (!BRAND_ASSET.test(url)) errors.push(`${BRAND_ENV[field]}="${url}": expected /brands/<name>/<file>`);
-        else if (!existsSync(file)) errors.push(`${BRAND_ENV[field]}="${url}": there is no ${file}`);
+        if (!BRAND_ASSET.test(url)) errors.push(`${name}="${url}": expected /brands/<name>/<file>`);
+        else if (!existsSync(file)) errors.push(`${name}="${url}": there is no ${file}`);
         else assets.set(url, file);
       }
       if (errors.length) {
         throw new Error(`Invalid brand configuration:\n  ${errors.join('\n  ')}`);
       }
-      const { brand, problems } = resolveBrand(values);
+      const { problems } = resolveBrand(values);
       for (const problem of problems) config.logger.warn(`[brand] ${problem}`);
       script = brandScript(values);
-      title = brand.name;
+      head = built.html;
     },
     configureServer(server) {
       /* Registered directly rather than returned, so it runs before Vite's own
@@ -73,10 +80,13 @@ function brandPlugin(): Plugin {
     },
     transformIndexHtml(html) {
       return {
-        /* The name in the HTML itself, for link previews in Slack or Teams,
-           which never run the page's scripts. Replaced with a function so a
-           "$&" in a brand name is text, not a replacement pattern. */
-        html: html.replace(/<title>[^<]*<\/title>/, () => `<title>${escapeHtml(title)}</title>`),
+        /* Title, icon and link-preview tags in the HTML itself: WhatsApp,
+           Slack and Teams never run the page's scripts. Replaced with a
+           function so a "$&" in a brand name is text, not a pattern. */
+        html: html.replace(
+          new RegExp(`${HEAD_START}[\\s\\S]*?${HEAD_END}`),
+          () => `${HEAD_START}\n${head}\n${HEAD_END}`,
+        ),
         /* At the end of <head>: both must run after <title> and <link rel=icon>
            exist, and before the app — brand-boot.js corrects them from the
            brand, including one written at container start. */
