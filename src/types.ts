@@ -78,6 +78,30 @@ export interface Attachment {
   createdAt: string;
 }
 
+/** The period a list answer was filtered to, as written by the model. It
+ *  carries no counts: those are read from the retrieved rows. */
+export interface AnswerScope {
+  label: string;
+  /** First day included, YYYY-MM-DD. */
+  from?: string;
+  /** Last day included, YYYY-MM-DD. */
+  to?: string;
+  /** What was listed — "consignments", "dispatches". */
+  noun?: string;
+  /** True when no period was asked for and the default window was applied. */
+  isDefault: boolean;
+}
+
+/** Counts behind a scoped list, read off the query's own rows. */
+export interface ScopeCounts {
+  /** Every record in the period, counted before the row cap. */
+  inPeriod?: number;
+  /** Every record with no date filter. */
+  total?: number;
+  /** Rows the list query actually returned. */
+  returned?: number;
+}
+
 export interface ChartSpec {
   /**
    * Forms deliberately excluded, so the next person does not re-add them:
@@ -164,6 +188,21 @@ export interface Turn {
   result?: AskResult;
   error?: string;
   pending: boolean;
+  /**
+   * What has arrived so far while the answer is streaming. `steps` is text
+   * written alongside earlier tool calls, kept on screen; `text` is what is
+   * being written now; `tool` and `intent` describe the step running, and
+   * `writing` is true while text is arriving. Dropped once `result` lands.
+   */
+  live?: {
+    steps: string[];
+    text: string;
+    tool?: string;
+    intent?: string;
+    writing?: boolean;
+    /** The one-line acknowledgement, shown above the loader. */
+    ack?: string;
+  };
 }
 
 export interface Tile {

@@ -129,6 +129,98 @@ export async function ask(
   return json<AskResult>(res);
 }
 
+/** Progress of a streamed ask, as sent by POST /agent/ask/stream. */
+export interface AskStreamHandlers {
+  /** A tool is about to run; `intent` is the model's one-line description. */
+  onStatus?: (tool: string, intent?: string) => void;
+  /** The next piece of the reply. */
+  onText?: (delta: string) => void;
+  /** Text shown so far was a step, not the answer — discard it. */
+  onReset?: () => void;
+  /** The first step's text was the one-line acknowledgement; keep it on top. */
+  onAck?: (text: string) => void;
+}
+
+/**
+ * The same exchange as ask(), with the reply arriving as it is written.
+ *
+ * Read with fetch rather than EventSource: EventSource can only GET and cannot
+ * send the Authorization header. Resolves with the same AskResult ask() does,
+ * so everything after the answer lands is unchanged.
+ *
+ * A stream that ends without `done` or `error` is treated exactly like a
+ * dropped connection — the service keeps working and saves the turn, so the
+ * caller's recovery path applies.
+ */
+export async function askStream(
+  question: string,
+  conversationId: string | null,
+  replaceTurnId: string | null | undefined,
+  handlers: AskStreamHandlers,
+): Promise<AskResult> {
+  let res: Response;
+  try {
+    res = await fetch(url('/agent/ask/stream'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        question,
+        conversation_id: conversationId,
+        ...(replaceTurnId ? { replace_turn_id: replaceTurnId } : {}),
+      }),
+    });
+  } catch {
+    throw new ConnectionLostError();
+  }
+  // Validation and auth failures arrive before the stream opens, as plain JSON.
+  if (!res.ok || !res.body) return json<AskResult>(res);
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value.replace(/\r\n/g, '\n');
+
+      let end: number;
+      while ((end = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+
+        let event = 'message';
+        let data = '';
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trimStart();
+          // Lines starting with ':' are heartbeats.
+        }
+        if (!data) continue;
+        const payload = JSON.parse(data);
+
+        switch (event) {
+          case 'status': handlers.onStatus?.(payload.tool, payload.intent); break;
+          case 'text': handlers.onText?.(payload.delta); break;
+          case 'reset': handlers.onReset?.(); break;
+          case 'ack': handlers.onAck?.(payload.text); break;
+          case 'done': return payload as AskResult;
+          case 'error': throw new Error(payload.message || 'The request failed.');
+        }
+      }
+    }
+  } catch (e) {
+    if (e instanceof Error && !(e instanceof TypeError)) throw e;
+    // A TypeError here is the socket failing mid-read.
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  throw new ConnectionLostError();
+}
+
 /**
  * Looks for the answer to a question whose request died in transit.
  *

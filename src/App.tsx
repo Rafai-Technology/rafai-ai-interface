@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ask, ConnectionLostError, conversationTurns, conversations, deleteAttachment, deleteConversation,
+  askStream, ConnectionLostError, conversationTurns, conversations, deleteAttachment, deleteConversation,
   listAttachments, recoverAskResult, setPinned,
   listRoles, schema, switchRole, uploadAttachment,
 } from './api';
@@ -310,12 +310,37 @@ export default function App() {
       setAttachError(null);
       setBusy(true);
 
+      /* Streamed pieces are collected here and painted once per frame. A
+         setState per token re-renders the whole thread tens of times a second
+         for no visible difference. */
+      const live: NonNullable<Turn['live']> = { steps: [], text: '' };
+      let frame = 0;
+      const paint = () => {
+        frame = 0;
+        const snapshot = { ...live, steps: [...live.steps] };
+        setTurns((t) => t.map((turn) => (turn.id === id && turn.pending ? { ...turn, live: snapshot } : turn)));
+      };
+      const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
+
       try {
-        const result = await ask(q, chatId, replace?.turnId);
+        const result = await askStream(q, chatId, replace?.turnId, {
+          onStatus: (tool, intent) => { live.tool = tool; live.intent = intent; live.writing = false; schedule(); },
+          onText: (delta) => { live.text += delta; live.writing = true; schedule(); },
+          /* The text was a step, not the answer — but the user has already read
+             it, so it stays on screen until the final answer replaces it. */
+          onAck: (text) => { live.ack = text; live.text = ''; live.writing = false; schedule(); },
+          onReset: () => {
+            if (live.text.trim()) live.steps.push(live.text);
+            live.text = '';
+            live.writing = false;
+            schedule();
+          },
+        });
+        if (frame) cancelAnimationFrame(frame);
         setTurns((t) =>
           t.map((turn) =>
             turn.id === id
-              ? { ...turn, result, pending: false, turnId: result.turn_id ?? null }
+              ? { ...turn, result, pending: false, live: undefined, turnId: result.turn_id ?? null }
               : turn,
           ),
         );
@@ -330,6 +355,7 @@ export default function App() {
         }
         await reloadChats();
       } catch (e: any) {
+        if (frame) cancelAnimationFrame(frame);
         /* A dropped connection is not the same as a failed answer. A long
            question can outlive a proxy's read timeout while the service keeps
            working and stores the turn — which is why refreshing the page used
@@ -349,7 +375,7 @@ export default function App() {
             setTurns((t) =>
               t.map((turn) =>
                 turn.id === id
-                  ? { ...turn, result: recovered, pending: false, turnId: recovered.turn_id ?? null }
+                  ? { ...turn, result: recovered, pending: false, live: undefined, turnId: recovered.turn_id ?? null }
                   : turn,
               ),
             );
@@ -365,7 +391,7 @@ export default function App() {
         setTurns((t) =>
           t.map((turn) =>
             turn.id === id
-              ? { ...turn, error: e.message ?? 'The request failed.', pending: false }
+              ? { ...turn, error: e.message ?? 'The request failed.', pending: false, live: undefined }
               : turn,
           ),
         );
@@ -673,6 +699,7 @@ export default function App() {
               conversationId={chatId}
               onFeatureCreated={(id) => navigate(`/features/${id}`)}
               onResubmit={(q, replace) => void submit(q, replace)}
+              onAsk={(q) => void submit(q)}
               busy={busy}
             />
           )}

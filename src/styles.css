@@ -2272,3 +2272,133 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   font-variant-numeric: tabular-nums;
 }
 .chatitem-clip svg { width: 11px; height: 11px; }
+
+/* =====================================================================
+   STREAMING ANSWER
+   A small spinner and a one-line status stay above the text for as long as
+   the answer is being worked on; everything written so far sits below it.
+   The caret on the last block is the signal that more text is coming.
+   ===================================================================== */
+.pending { display: grid; gap: 10px; }
+.working { display: grid; gap: 3px; }
+.working-line { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--muted); }
+.spinner {
+  width: 14px; height: 14px; flex: none; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-deep) 22%, transparent);
+  border-top-color: var(--accent-deep);
+  animation: spin 0.8s linear infinite;
+}
+/* A light sweep across the words, as Claude's own status line does. */
+.working-text {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--text, currentColor) 50%, var(--muted) 60%, var(--muted) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: status-sweep 2s linear infinite, fade 240ms var(--ease);
+}
+@keyframes status-sweep { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.working-note { font-size: 12px; color: var(--muted); padding-left: 23px; }
+.live-answer { position: relative; display: grid; gap: 8px; }
+/* Text from an earlier step is part of the answer, so it reads the same. */
+.live-step { color: var(--text); }
+.live-current { animation: fade 200ms var(--ease); }
+/* The acknowledgement: plain text at full weight, above the loader. */
+.live-ack { color: var(--text); animation: fade 200ms var(--ease); }
+.live-current .prose > :last-child::after {
+  content: ''; display: inline-block; width: 7px; height: 1em; margin-left: 3px;
+  border-radius: 1px; background: var(--accent-deep); vertical-align: text-bottom;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  .working-text { animation: none; background: none; color: var(--muted); }
+  .live-current .prose > :last-child::after { animation: none; opacity: 0.7; }
+  .live-current { animation: none; }
+}
+
+/* =====================================================================
+   FOLLOW-UP QUESTIONS
+   A plain list under the answer, one question per row, like Perplexity's
+   "Related". Rows rather than chips: these are sentences, and a wrapped chip
+   is harder to read than a line.
+   ===================================================================== */
+.followups { display: grid; gap: 6px; margin-top: 2px; }
+.followups-label {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  text-transform: uppercase; color: var(--muted);
+}
+.followups ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.followups li + li { border-top: 1px solid var(--border); }
+.followup {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 2px; background: none; border: 0; cursor: pointer;
+  font: inherit; font-size: 14px; color: var(--text); text-align: left;
+}
+.followup-text { min-width: 0; overflow-wrap: anywhere; }
+.followup-arrow { flex: none; color: var(--muted); transition: transform var(--fast, 120ms) var(--ease); }
+.followup:hover .followup-text, .followup:focus-visible .followup-text { color: var(--accent-deep); }
+.followup:hover .followup-arrow { transform: translateX(3px); color: var(--accent-deep); }
+.followup:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; border-radius: 6px; }
+.followup:disabled { cursor: default; opacity: 0.5; }
+.followup:disabled:hover .followup-text { color: var(--text); }
+/* The insight question: a highlighted card, because it opens the analysis
+   tools rather than fetching one more figure. */
+.followup-insight {
+  width: 100%; margin-top: 6px; display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 12px; cursor: pointer; text-align: left;
+  font: inherit; color: var(--text);
+  background: color-mix(in srgb, var(--accent-deep) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent-deep) 28%, transparent);
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.followup-insight-icon {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px;
+  border-radius: 8px; font-size: 15px;
+  background: var(--accent-deep); color: var(--on-accent);
+}
+.followup-insight-body { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.followup-insight-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--accent-deep);
+}
+.followup-insight-text { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.followup-insight:hover, .followup-insight:focus-visible {
+  background: color-mix(in srgb, var(--accent-deep) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-deep) 45%, transparent);
+}
+.followup-insight:hover .followup-arrow { transform: translateX(3px); color: var(--accent-deep); }
+.followup-insight:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; }
+.followup-insight:disabled { cursor: default; opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .followup-arrow, .followup-insight { transition: none; } }
+
+/* =====================================================================
+   SCOPE BAR
+   The period a list covers and how much of the data that is, above the
+   answer. Quiet by design: it qualifies the answer, it is not the answer.
+   ===================================================================== */
+.scope-bar {
+  display: grid; gap: 8px; padding: 9px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-deep) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent-deep) 18%, transparent);
+}
+.scope-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13.5px; }
+.scope-period { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+.scope-period svg { color: var(--accent-deep); flex: none; }
+.scope-tag {
+  font-size: 11px; font-weight: 500; color: var(--muted);
+  padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border);
+}
+.scope-count { color: var(--muted); }
+.scope-count strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.scope-cut { color: var(--muted); font-size: 12.5px; }
+.scope-widen { display: flex; flex-wrap: wrap; gap: 6px; }
+.scope-chip {
+  font: inherit; font-size: 12.5px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.scope-chip:hover { border-color: var(--accent-deep); color: var(--accent-deep); }
+.scope-chip:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; }
+.scope-chip:disabled { opacity: 0.5; cursor: default; }
+.scope-chip:disabled:hover { border-color: var(--border); color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .scope-chip { transition: none; } }

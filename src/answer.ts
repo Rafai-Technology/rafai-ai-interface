@@ -1,12 +1,116 @@
-import type { ChartSpec, TraceStep } from './types';
+import type { AnswerScope, ChartSpec, ScopeCounts, TraceStep } from './types';
 
 // Models label the block inconsistently — chart, json, or nothing. Accept any
 // fenced block that parses into something with the shape of a chart spec.
 const FENCE = /```(\w+)?\s*([\s\S]*?)```/g;
 
+/** A suggested next question; `insight` marks the one that showcases analysis. */
+export interface FollowUp {
+  text: string;
+  insight: boolean;
+}
+
 export interface ParsedAnswer {
   text: string;
   chart: ChartSpec | null;
+  /** Next questions the model suggests, shown as buttons under the answer. */
+  followups: FollowUp[];
+  /** The period a list was filtered to, shown above the answer. */
+  scope: AnswerScope | null;
+}
+
+const SCOPE = /```scope\s*([\s\S]*?)```/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Pulls the ```scope block out of an answer. Only a label is required; a
+ * malformed block is dropped without a header rather than shown half-built.
+ */
+function takeScope(answer: string): { text: string; scope: AnswerScope | null } {
+  const match = SCOPE.exec(answer);
+  if (!match) return { text: answer, scope: null };
+  const text = answer.replace(match[0], '');
+  try {
+    const raw = JSON.parse(match[1].trim());
+    if (!raw || typeof raw.label !== 'string' || !raw.label.trim()) return { text, scope: null };
+    const date = (v: unknown) => (typeof v === 'string' && ISO_DATE.test(v) ? v : undefined);
+    return {
+      text,
+      scope: {
+        label: raw.label.trim().slice(0, 60),
+        from: date(raw.from),
+        to: date(raw.to),
+        noun: typeof raw.noun === 'string' && raw.noun.trim() ? raw.noun.trim().slice(0, 40) : undefined,
+        isDefault: raw.default === true,
+      },
+    };
+  } catch {
+    return { text, scope: null };
+  }
+}
+
+/**
+ * The counts for the header, from the list query's own rows — never from the
+ * prose, for the same reason the chart is drawn from rows: a figure the model
+ * retyped is a figure that can be retyped wrong.
+ *
+ * Takes the last successful query that returned period_count or total_all.
+ */
+export function scopeCounts(trace: TraceStep[]): ScopeCounts | null {
+  const num = (v: unknown) => {
+    const n = typeof v === 'string' ? Number(v) : v;
+    return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const step = trace[i];
+    const first = step.status === 'ok' ? step.rows?.[0] : undefined;
+    if (!first) continue;
+    const inPeriod = num(first.period_count);
+    const total = num(first.total_all);
+    if (inPeriod === undefined && total === undefined) continue;
+    return { inPeriod, total, returned: step.rowCount ?? step.rows?.length };
+  }
+  return null;
+}
+
+const FOLLOWUPS = /```followups\s*([\s\S]*?)```/;
+
+/**
+ * Pulls the ```followups block out of an answer.
+ *
+ * Items are strings, or {"text", "insight": true} for the highlighted one.
+ * Anything else yields no button: a click sends the text as a question, so a
+ * stray object or number must never reach the composer. Capped at three, the
+ * most the model is asked for, de-duplicated, with at most one insight.
+ */
+function takeFollowups(answer: string): { text: string; followups: FollowUp[] } {
+  const match = FOLLOWUPS.exec(answer);
+  if (!match) return { text: answer, followups: [] };
+  const text = answer.replace(match[0], '');
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    if (!Array.isArray(parsed)) return { text, followups: [] };
+    const followups: FollowUp[] = [];
+    for (const q of parsed) {
+      const raw = typeof q === 'string' ? q : q && typeof q.text === 'string' ? q.text : null;
+      const question = raw?.trim();
+      if (!question || question.length > 200) continue;
+      if (followups.some((f) => f.text === question)) continue;
+      const insight =
+        typeof q === 'object' && q.insight === true && !followups.some((f) => f.insight);
+      followups.push({ text: question, insight });
+      if (followups.length === 3) break;
+    }
+    /* There is always one highlighted question. Answers where the model marked
+       none (saved before the rule, or it forgot) highlight the last, which is
+       where the prompt puts the insight. */
+    if (followups.length && !followups.some((f) => f.insight)) {
+      followups[followups.length - 1].insight = true;
+    }
+    return { text, followups };
+  } catch {
+    return { text, followups: [] };
+  }
 }
 
 /**
@@ -22,12 +126,22 @@ const CHART_TYPES = new Set<ChartSpec['type']>([
   'bar', 'hbar', 'line', 'stacked', 'pie', 'scatter', 'pareto',
 ]);
 
+/**
+ * DeepSeek's tool-call markup, written as text by mistake. The service strips
+ * it now, but answers saved before that still carry it, and it must not be
+ * rendered as prose. Always the tail of a message, often unclosed.
+ */
+const TOOL_CALL_MARKUP = /<｜(?:DSML｜|tool▁calls▁begin｜>|tool▁call▁begin｜>)[\s\S]*$/;
+
 export function parseAnswer(answer: string): ParsedAnswer {
+  answer = answer.replace(TOOL_CALL_MARKUP, '');
   let chart: ChartSpec | null = null;
-  let text = answer;
+  const taken = takeFollowups(answer);
+  const scoped = takeScope(taken.text);
+  let text = scoped.text;
 
   FENCE.lastIndex = 0;
-  for (const match of answer.matchAll(FENCE)) {
+  for (const match of scoped.text.matchAll(FENCE)) {
     const [block, , body] = match;
     let spec: any;
     try {
@@ -56,7 +170,7 @@ export function parseAnswer(answer: string): ParsedAnswer {
     break;
   }
 
-  return { text: text.trim(), chart };
+  return { text: text.trim(), chart, followups: taken.followups, scope: scoped.scope };
 }
 
 /**

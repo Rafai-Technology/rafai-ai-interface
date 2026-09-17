@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Mode } from '../theme';
-import type { Turn, TraceStep } from '../types';
-import { forecastChart, inferChart, parseAnswer, rowsForChart } from '../answer';
+import type { AnswerScope, ScopeCounts, Turn, TraceStep } from '../types';
+import { forecastChart, inferChart, parseAnswer, rowsForChart, scopeCounts, type FollowUp } from '../answer';
 import { exportAsPdf, exportRowsAsCsv, provenanceFrom } from '../export';
 import { formatBytes, splitFilename } from '../format';
 import { ChartRenderer } from './ChartRenderer';
@@ -69,6 +69,8 @@ interface Props {
   /** True while a question is in flight — the controls disable rather than
    *  queueing a second ask on top of one already running. */
   busy?: boolean;
+  /** Ask a new question in this chat — used by the follow-up buttons. */
+  onAsk?: (question: string) => void;
 }
 
 /**
@@ -147,30 +149,133 @@ function QuestionEditor({
  * A running clock reads as work in progress, and it tells the truth about how
  * long the model is taking.
  */
-function Waiting() {
+/** What each tool is doing, in words a transport operator would use. */
+const TOOL_STAGE: Record<string, string> = {
+  describe_tables: 'Choosing the right views…',
+  run_sql: 'Running the query…',
+  run_forecast: 'Building the forecast…',
+  detect_anomalies: 'Checking for unusual months…',
+  diagnose_process: 'Checking the process…',
+  search_business_logic: 'Looking up how Web Trans calculates this…',
+  export_result: 'Preparing the file…',
+};
+
+/** Shown before the first step starts, one after another, the way Claude
+ *  keeps a quiet line moving while it thinks. */
+const THINKING_MESSAGES = [
+  'Thinking…',
+  'Reading your question…',
+  'Finding the right data…',
+  'Planning the query…',
+];
+
+/**
+ * The loader that stays above the answer for as long as it is being worked on.
+ *
+ * It never replaces text: whatever the model has written so far stays below
+ * it, so a sentence about the date range does not vanish when the next query
+ * starts.
+ */
+function Working({ tool, intent, writing }: { tool?: string; intent?: string; writing?: boolean }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const stage =
-    secs < 3 ? 'Choosing the right views…'
-      : secs < 8 ? 'Running the query…'
-        : 'Writing the answer…';
+  const stage = writing
+    ? 'Writing the answer…'
+    : tool
+      ? (TOOL_STAGE[tool] ?? 'Working…')
+      : THINKING_MESSAGES[Math.floor(secs / 3) % THINKING_MESSAGES.length];
 
   return (
-    <div className="thinking-wrap">
-      <div className="thinking" role="status">
-        <span className="dots" aria-hidden><i /><i /><i /></span>
-        {stage}
+    <div className="working" role="status">
+      <div className="working-line">
+        <span className="spinner" aria-hidden />
+        {/* Keyed on the message so each new one fades in rather than swapping. */}
+        <span className="working-text" key={stage}>{stage}</span>
         <span className="elapsed">{secs}s</span>
       </div>
-      <div className="thinking-track" aria-hidden />
+      {intent && !writing && <div className="working-note">{intent}</div>}
       {secs >= 20 && (
-        <div className="thinking-note">
+        <div className="working-note">
           Still going — the free-tier model queues under load. A paid key
           answers this in a few seconds.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Text written so far, from every step.
+ *
+ * The chart spec is a fenced JSON block at the end of the reply; half of one
+ * is not something to show, so an unclosed fence is cut off, and a closed
+ * chart block is removed the same way the finished answer removes it.
+ */
+function liveVisible(text: string): string {
+  const fences = text.split('```').length - 1;
+  const open = fences % 2 === 1 ? text.slice(0, text.lastIndexOf('```')) : text;
+  return parseAnswer(open).text;
+}
+
+/**
+ * Reveals text at a steady pace instead of in the bursts it arrives in.
+ *
+ * Tokens come a few at a time and then, after a query, in a rush of a
+ * hundred characters at once; painted as they land, the text stutters. This
+ * shows a few characters per frame, faster the further behind it is, so a
+ * burst reads as quick typing and a pause reads as a pause. It is never more
+ * than a fraction of a second behind, and catches up at once when the text is
+ * reset.
+ */
+function useSteadyReveal(target: string): string {
+  const [shown, setShown] = useState('');
+  useEffect(() => {
+    if (!target.startsWith(shown)) { setShown(target.length < shown.length ? target : ''); return; }
+    if (shown.length >= target.length) return;
+    let frame = requestAnimationFrame(() => {
+      const behind = target.length - shown.length;
+      // ~3 chars/frame when close, most of the backlog when far behind.
+      const step = Math.max(3, Math.ceil(behind / 6));
+      setShown(target.slice(0, shown.length + step));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [target, shown]);
+  return shown;
+}
+
+function Pending({ live }: { live?: Turn['live'] }) {
+  const steps = (live?.steps ?? []).map(liveVisible).filter((b) => b.trim());
+  const current = liveVisible(useSteadyReveal(live?.text ?? ''));
+
+  /* The acknowledgement ("Theek hai, … thoda time dijiye") is the first thing
+     the model says, so it goes first — above the loader, at full weight, for
+     the whole wait. Until the server confirms it, text written before any step
+     has started is shown in the same place, so it does not jump when the
+     confirmation lands. */
+  const beforeFirstStep = !live?.ack && !live?.tool && steps.length === 0;
+  const top = live?.ack ? liveVisible(live.ack) : beforeFirstStep ? current : '';
+  const below = beforeFirstStep ? '' : current;
+
+  return (
+    <div className="pending">
+      {top.trim() && (
+        <div className={`live-ack${live?.ack ? '' : ' live-current'}`} aria-live="polite">
+          <Markdown text={top} />
+        </div>
+      )}
+      <Working tool={live?.tool} intent={live?.intent} writing={live?.writing} />
+      {(steps.length > 0 || below.trim()) && (
+        <div className="live-answer" aria-live="polite">
+          {/* What the model wrote beside earlier steps. The service joins it
+              into the final answer, so it is shown as answer text. */}
+          {steps.map((b, i) => (
+            <div className="live-step" key={i}><Markdown text={b} /></div>
+          ))}
+          {below.trim() && <div className="live-current"><Markdown text={below} /></div>}
         </div>
       )}
     </div>
@@ -214,14 +319,138 @@ function KeepAsFeature({ turn, conversationId, onCreated }: {
   );
 }
 
-function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
-  if (turn.pending) return <Waiting />;
+/**
+ * Suggested next questions, under the answer, the way Perplexity lists
+ * "Related". Each one is a whole question: a click asks it as written.
+ * Disabled while another answer is in flight rather than queued behind it.
+ */
+function FollowUps({ items, onAsk, busy }: {
+  items: FollowUp[];
+  onAsk?: (question: string) => void;
+  busy?: boolean;
+}) {
+  if (!items.length || !onAsk) return null;
+  const related = items.filter((f) => !f.insight);
+  const insight = items.find((f) => f.insight);
+  return (
+    <nav className="followups" aria-label="Follow-up questions">
+      {related.length > 0 && (
+        <>
+          <div className="followups-label">Related</div>
+          <ul>
+            {related.map((f) => (
+              <li key={f.text}>
+                <button type="button" className="followup" disabled={busy} onClick={() => onAsk(f.text)}>
+                  <span className="followup-text">{f.text}</span>
+                  <span className="followup-arrow" aria-hidden>→</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {insight && (
+        <button
+          type="button"
+          className="followup-insight"
+          disabled={busy}
+          onClick={() => onAsk(insight.text)}
+        >
+          <span className="followup-insight-icon" aria-hidden>✦</span>
+          <span className="followup-insight-body">
+            <span className="followup-insight-label">Get insights</span>
+            <span className="followup-insight-text">{insight.text}</span>
+          </span>
+          <span className="followup-arrow" aria-hidden>→</span>
+        </button>
+      )}
+    </nav>
+  );
+}
+
+const count = (n: number) => n.toLocaleString('en-IN');
+
+/** Wider periods offered from the header, as questions the user could type. */
+const WIDEN: { label: string; phrase: string }[] = [
+  { label: 'Last month', phrase: 'for last month' },
+  { label: 'Last 3 months', phrase: 'for the last 3 months' },
+  { label: 'This FY', phrase: 'for this financial year' },
+  { label: 'All time', phrase: 'for all time' },
+];
+
+/**
+ * The period a list covers, above the answer, with how much of the data that
+ * is — so "412 consignments" is never read as every consignment there is.
+ *
+ * The counts come from the rows (scopeCounts); a count that is missing is left
+ * out rather than guessed. When the list itself stopped at the row cap, that
+ * is said too, because the period count is then larger than what is listed.
+ */
+function ScopeBar({ scope, counts, onAsk, busy }: {
+  scope: AnswerScope;
+  counts: ScopeCounts | null;
+  onAsk?: (question: string) => void;
+  busy?: boolean;
+}) {
+  const noun = scope.noun ?? 'records';
+  const inPeriod = counts?.inPeriod;
+  const total = counts?.total;
+  const cut = inPeriod !== undefined && counts?.returned !== undefined && counts.returned < inPeriod;
+
+  return (
+    <div className="scope-bar" role="note">
+      <div className="scope-main">
+        <span className="scope-period">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+            <rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          {scope.label}
+          {scope.isDefault && <span className="scope-tag">default</span>}
+        </span>
+        {inPeriod !== undefined && (
+          <span className="scope-count">
+            <strong>{count(inPeriod)}</strong> {noun}
+            {total !== undefined && <> of <strong>{count(total)}</strong> in total</>}
+          </span>
+        )}
+        {cut && <span className="scope-cut">showing the latest {count(counts!.returned!)}</span>}
+      </div>
+      {onAsk && (
+        <div className="scope-widen" aria-label="Change the period">
+          {WIDEN.map((w) => (
+            <button
+              key={w.label}
+              type="button"
+              className="scope-chip"
+              disabled={busy}
+              onClick={() => onAsk(`Show the same ${noun} ${w.phrase}`)}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Answer({ turn, mode, onAsk, busy }: {
+  turn: Turn;
+  mode: Mode;
+  onAsk?: (question: string) => void;
+  busy?: boolean;
+}) {
+  if (turn.pending) {
+    return <Pending live={turn.live} />;
+  }
   if (turn.error) {
     return <div className="error">{turn.error}</div>;
   }
   if (!turn.result) return null;
 
-  const { text, chart: given } = parseAnswer(turn.result.answer);
+  const { text, chart: given, followups, scope } = parseAnswer(turn.result.answer);
+  const counts = scope ? scopeCounts(turn.result.trace) : null;
   const chart =
     forecastChart(turn.result.trace) ?? given ?? inferChart(turn.result.trace);
   const rows = chart ? rowsForChart(turn.result.trace, chart) : null;
@@ -243,6 +472,7 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
 
   return (
     <>
+      {scope && <ScopeBar scope={scope} counts={counts} onAsk={onAsk} busy={busy} />}
       <Markdown text={text} />
       {findings && findings.length > 0 && <InsightsPanel findings={findings} />}
       {chart && rows ? (
@@ -285,12 +515,13 @@ function Answer({ turn, mode }: { turn: Turn; mode: Mode }) {
         </div>
       )}
       <SqlInspector trace={turn.result.trace} hops={turn.result.hops} />
+      <FollowUps items={followups} onAsk={onAsk} busy={busy} />
     </>
   );
 }
 
 export function ChatPanel({
-  turns, mode, conversationId, onFeatureCreated, onResubmit, busy,
+  turns, mode, conversationId, onFeatureCreated, onResubmit, busy, onAsk,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   /** Which question was just copied, so the button can confirm it briefly. */
@@ -309,8 +540,20 @@ export function ChatPanel({
   };
   const endRef = useRef<HTMLDivElement>(null);
 
+  /* Follow the answer as it streams, but only while the reader is already at
+     the bottom. Someone who has scrolled up to re-read the question is not
+     dragged back down on every frame of new text. Instant while streaming
+     (a smooth scroll per frame never finishes), smooth otherwise. */
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const end = endRef.current;
+    const pane = end?.closest('.scroll') as HTMLElement | null;
+    if (!end) return;
+    const streaming = turns.some((t) => t.pending);
+    if (pane) {
+      const fromBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+      if (streaming && fromBottom > 160) return;
+    }
+    end.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth', block: 'end' });
   }, [turns]);
 
   return (
@@ -421,7 +664,7 @@ export function ChatPanel({
           )}
 
           <div className="answer" aria-live="polite" aria-atomic="false">
-            <Answer turn={turn} mode={mode} />
+            <Answer turn={turn} mode={mode} onAsk={onAsk} busy={busy} />
             <KeepAsFeature
               turn={turn}
               conversationId={conversationId}
