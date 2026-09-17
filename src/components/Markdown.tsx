@@ -232,6 +232,14 @@ export function Markdown({ text }: { text: string }) {
       para.push(lines[i].trim());
       i++;
     }
+    /* A line that starts with '|' but has no separator under it — a table
+       header that is still streaming in, or a stray pipe — matched no block
+       above and is refused by the loop here. Without this it was never
+       consumed, the loop never advanced, and the tab hung. */
+    if (para.length === 0) {
+      para.push(lines[i].trim());
+      i++;
+    }
     blocks.push(
       <p key={key++}>
         {para.map((l, n) => (
