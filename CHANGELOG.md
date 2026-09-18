@@ -12,6 +12,23 @@ that ship no new behaviour.
 
 ### Added
 
+- **Every answer that ran a query shows its date range and row count.** A
+  figure used to read as covering the whole database even when the query was
+  filtered to a period or stopped at the row limit. `dataCoverage` in
+  `src/answer.ts` works it out from the trace, never from the prose: it takes
+  the query that returned the most rows (the list or series the answer is
+  about, not a one-row check beside it), its row count, `limitReached`, the
+  date filter read off the SQL by `sqlDateFilter` (fixed date literals on a
+  date column, including `BETWEEN` and `<` turned into an inclusive last day;
+  `GETDATE`/`DATEADD`/`MONTH(...)` style filters reported as "Filtered
+  period"; none as "All dates"), and the earliest and latest date present in
+  the rows. `CoverageBar` in `src/components/ChatPanel.tsx` shows it above the
+  answer: the period, a "Partial data" tag when there was a date filter or the
+  row limit was hit (otherwise "All matching data"), "20 rows · data from
+  1 Apr 2026 – 3 Apr 2026", and "row limit reached — more rows exist". Answers
+  with a scope block keep `ScopeBar`, which now also shows the row count.
+
+
 - **The first line acknowledges the question while the loader runs.** The
   service now sends an `ack` event with the one-line acknowledgement the model
   writes before its first tool ("Theek hai, sabse purane 20 consignments nikal
