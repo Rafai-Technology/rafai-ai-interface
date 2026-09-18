@@ -7,6 +7,8 @@ export interface TraceStep {
   status: 'ok' | 'blocked' | 'error' | 'suppressed';
   reason?: string;
   rows?: Record<string, any>[];
+  /** run_sql: the result stopped at the role's row limit; more rows exist. */
+  limitReached?: boolean;
   /** diagnose_process only: measured process findings, each with its own
    *  evidence and a recommendation anchored to a real benchmark. */
   findings?: Finding[];
@@ -90,6 +92,25 @@ export interface AnswerScope {
   noun?: string;
   /** True when no period was asked for and the default window was applied. */
   isDefault: boolean;
+}
+
+/**
+ * What data an answer was drawn from, worked out from the query and its rows —
+ * never from the prose — so the reader can see it is not the whole database.
+ */
+export interface DataCoverage {
+  /** Rows the query returned. */
+  rows: number;
+  /** The query stopped at the row limit; more rows matched. */
+  limitReached: boolean;
+  /**
+   * The date filter in the SQL. null: no date filter, so all dates.
+   * `relative`: filtered with a date expression (GETDATE, DATEADD) rather
+   * than fixed dates, so only the data span below can say what it covered.
+   */
+  filter: { from?: string; to?: string; relative: boolean } | null;
+  /** Earliest and latest date actually present in the returned rows. */
+  span: { min: string; max: string } | null;
 }
 
 /** Counts behind a scoped list, read off the query's own rows. */

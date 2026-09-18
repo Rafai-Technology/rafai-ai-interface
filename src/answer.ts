@@ -1,4 +1,4 @@
-import type { AnswerScope, ChartSpec, ScopeCounts, TraceStep } from './types';
+import type { AnswerScope, ChartSpec, DataCoverage, ScopeCounts, TraceStep } from './types';
 
 // Models label the block inconsistently — chart, json, or nothing. Accept any
 // fenced block that parses into something with the shape of a chart spec.
@@ -275,5 +275,96 @@ export function inferChart(trace: TraceStep[]): ChartSpec | null {
     x: label,
     y: [value],
     title: `${value.replace(/_/g, ' ')} by ${label.replace(/_/g, ' ')}`,
+  };
+}
+
+const DAY = /^(\d{4}-\d{2}-\d{2})/;
+const MONTH = /^(\d{4}-\d{2})$/;
+
+/** A YYYY-MM-DD (or YYYY-MM for monthly series) out of a cell, or null. */
+function cellDate(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const d = DAY.exec(v);
+  if (d) return d[1];
+  return MONTH.test(v) ? v : null;
+}
+
+/** The day before a YYYY-MM-DD, for turning `< '2026-09-18'` into "to 17 Sep". */
+function dayBefore(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The date filter in a query, read off comparisons against a date column.
+ * String literals are the only thing trusted as fixed dates; a date column
+ * compared with an expression (GETDATE(), DATEADD, DATEFROMPARTS) is reported
+ * as a relative filter, and no date comparison at all as no filter.
+ */
+export function sqlDateFilter(sql: string): DataCoverage['filter'] {
+  const col = String.raw`[\w.\[\]]*date[\w\]]*`;
+  let from: string | undefined;
+  let to: string | undefined;
+
+  const between = new RegExp(String.raw`${col}\s+BETWEEN\s+'(\d{4}-\d{2}-\d{2})[^']*'\s+AND\s+'(\d{4}-\d{2}-\d{2})[^']*'`, 'gi');
+  for (const m of sql.matchAll(between)) {
+    from = !from || m[1] > from ? m[1] : from;
+    to = !to || m[2] < to ? m[2] : to;
+  }
+  const compare = new RegExp(String.raw`${col}\s*(>=|>|<=|<|=)\s*'(\d{4}-\d{2}-\d{2})[^']*'`, 'gi');
+  for (const m of sql.matchAll(compare)) {
+    const [, op, day] = m;
+    if (op === '>=' || op === '>' || op === '=') from = !from || day > from ? day : from;
+    if (op === '<=' || op === '=') to = !to || day < to ? day : to;
+    if (op === '<') { const last = dayBefore(day); to = !to || last < to ? last : to; }
+  }
+  if (from || to) return { from, to, relative: false };
+
+  const relative = new RegExp(String.raw`${col}\s*(>=|>|<=|<|=|BETWEEN)\s*(DATEADD|DATEFROMPARTS|GETDATE|EOMONTH|CAST|CONVERT|SYSDATETIME|DATEDIFF)`, 'i');
+  const relativeLeft = /\b(YEAR|MONTH|DATEDIFF|DATEPART)\s*\([^)]*date[^)]*\)\s*(=|>=|<=|>|<)/i;
+  if (relative.test(sql) || relativeLeft.test(sql)) return { relative: true };
+  return null;
+}
+
+/**
+ * What the answer was drawn from: the query that returned the most rows (the
+ * list or series the answer is about, rather than a one-row check run beside
+ * it), its row count, whether it hit the row limit, its date filter, and the
+ * span of dates actually present in its rows.
+ */
+export function dataCoverage(trace: TraceStep[]): DataCoverage | null {
+  let best: TraceStep | null = null;
+  for (const step of trace) {
+    if (step.tool !== 'run_sql' || step.status !== 'ok' || !step.sql) continue;
+    const n = step.rowCount ?? step.rows?.length ?? 0;
+    if (!best || n >= (best.rowCount ?? best.rows?.length ?? 0)) best = step;
+  }
+  if (!best) return null;
+
+  let span: DataCoverage['span'] = null;
+  const rows = best.rows ?? [];
+  if (rows.length) {
+    const keys = Object.keys(rows[0]);
+    const dateKeys = keys.filter((k) => /date|period|month/i.test(k) && rows.some((r) => cellDate(r[k])));
+    const key = dateKeys.find((k) => /booking/i.test(k)) ?? dateKeys[0];
+    if (key) {
+      let min = '';
+      let max = '';
+      for (const r of rows) {
+        const d = cellDate(r[key]);
+        if (!d) continue;
+        if (!min || d < min) min = d;
+        if (!max || d > max) max = d;
+      }
+      if (min) span = { min, max };
+    }
+  }
+
+  return {
+    rows: best.rowCount ?? rows.length,
+    limitReached: best.limitReached === true,
+    filter: sqlDateFilter(best.sql!),
+    span,
   };
 }

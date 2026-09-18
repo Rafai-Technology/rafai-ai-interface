@@ -2402,3 +2402,14 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .scope-chip:disabled { opacity: 0.5; cursor: default; }
 .scope-chip:disabled:hover { border-color: var(--border); color: var(--text); }
 @media (prefers-reduced-motion: reduce) { .scope-chip { transition: none; } }
+/* The same bar for answers with no scope block. Neutral when the query read
+   all dates; the accent tint is kept for partial data, which is the case the
+   reader must not miss. */
+.coverage-bar:not(.is-partial) {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.coverage-bar.is-partial .scope-tag {
+  color: var(--accent-deep);
+  border-color: color-mix(in srgb, var(--accent-deep) 40%, transparent);
+}

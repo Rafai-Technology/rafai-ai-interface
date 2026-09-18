@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Mode } from '../theme';
-import type { AnswerScope, ScopeCounts, Turn, TraceStep } from '../types';
-import { forecastChart, inferChart, parseAnswer, rowsForChart, scopeCounts, type FollowUp } from '../answer';
+import type { AnswerScope, DataCoverage, ScopeCounts, Turn, TraceStep } from '../types';
+import { dataCoverage, forecastChart, inferChart, parseAnswer, rowsForChart, scopeCounts, type FollowUp } from '../answer';
 import { exportAsPdf, exportRowsAsCsv, provenanceFrom } from '../export';
 import { formatBytes, splitFilename } from '../format';
 import { ChartRenderer } from './ChartRenderer';
@@ -370,6 +370,66 @@ function FollowUps({ items, onAsk, busy }: {
 
 const count = (n: number) => n.toLocaleString('en-IN');
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-09-01" -> "1 Sep 2026"; "2026-09" -> "Sep 2026". */
+function fmtDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  const month = MONTH_NAMES[Number(m) - 1] ?? m;
+  return d ? `${Number(d)} ${month} ${y}` : `${month} ${y}`;
+}
+
+function fmtRange(from?: string, to?: string): string {
+  if (from && to) return from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`;
+  if (from) return `from ${fmtDate(from)}`;
+  if (to) return `up to ${fmtDate(to)}`;
+  return '';
+}
+
+const CalendarIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+    <rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+
+/**
+ * Which dates and how many rows an answer was drawn from, above every answer
+ * that ran a query — so a figure is never read as covering the whole database
+ * when it covers a period, or a list stopped at the row limit.
+ *
+ * Everything here is read off the query and its rows (dataCoverage), not the
+ * prose. "Partial data" is shown when the query had a date filter or hit the
+ * row limit; "All dates" when it had neither.
+ */
+function CoverageBar({ coverage }: { coverage: DataCoverage }) {
+  const { filter, span, rows, limitReached } = coverage;
+  const partial = limitReached || filter !== null;
+  const period = filter === null
+    ? 'All dates'
+    : filter.relative
+      ? 'Filtered period'
+      : fmtRange(filter.from, filter.to);
+  const spanText = span ? fmtRange(span.min, span.max === span.min ? undefined : span.max) : '';
+
+  return (
+    <div className={`scope-bar coverage-bar${partial ? ' is-partial' : ''}`} role="note">
+      <div className="scope-main">
+        <span className="scope-period">
+          <CalendarIcon />
+          {period}
+          <span className="scope-tag">{partial ? 'Partial data' : 'All matching data'}</span>
+        </span>
+        <span className="scope-count">
+          <strong>{count(rows)}</strong> {rows === 1 ? 'row' : 'rows'}
+          {spanText && <> · data {span!.min === span!.max ? 'on' : 'from'} {spanText.replace(/^from /, '')}</>}
+        </span>
+        {limitReached && <span className="scope-cut">row limit reached — more rows exist</span>}
+      </div>
+    </div>
+  );
+}
+
 /** Wider periods offered from the header, as questions the user could type. */
 const WIDEN: { label: string; phrase: string }[] = [
   { label: 'Last month', phrase: 'for last month' },
@@ -401,10 +461,7 @@ function ScopeBar({ scope, counts, onAsk, busy }: {
     <div className="scope-bar" role="note">
       <div className="scope-main">
         <span className="scope-period">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
-            <rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
+          <CalendarIcon />
           {scope.label}
           {scope.isDefault && <span className="scope-tag">default</span>}
         </span>
@@ -415,6 +472,9 @@ function ScopeBar({ scope, counts, onAsk, busy }: {
           </span>
         )}
         {cut && <span className="scope-cut">showing the latest {count(counts!.returned!)}</span>}
+        {!cut && counts?.returned !== undefined && (
+          <span className="scope-count"><strong>{count(counts.returned)}</strong> rows</span>
+        )}
       </div>
       {onAsk && (
         <div className="scope-widen" aria-label="Change the period">
@@ -451,6 +511,7 @@ function Answer({ turn, mode, onAsk, busy }: {
 
   const { text, chart: given, followups, scope } = parseAnswer(turn.result.answer);
   const counts = scope ? scopeCounts(turn.result.trace) : null;
+  const coverage = scope ? null : dataCoverage(turn.result.trace);
   const chart =
     forecastChart(turn.result.trace) ?? given ?? inferChart(turn.result.trace);
   const rows = chart ? rowsForChart(turn.result.trace, chart) : null;
@@ -472,7 +533,9 @@ function Answer({ turn, mode, onAsk, busy }: {
 
   return (
     <>
-      {scope && <ScopeBar scope={scope} counts={counts} onAsk={onAsk} busy={busy} />}
+      {scope
+        ? <ScopeBar scope={scope} counts={counts} onAsk={onAsk} busy={busy} />
+        : coverage && <CoverageBar coverage={coverage} />}
       <Markdown text={text} />
       {findings && findings.length > 0 && <InsightsPanel findings={findings} />}
       {chart && rows ? (
