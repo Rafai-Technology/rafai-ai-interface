@@ -65,10 +65,14 @@ export function scopeCounts(trace: TraceStep[]): ScopeCounts | null {
     const step = trace[i];
     const first = step.status === 'ok' ? step.rows?.[0] : undefined;
     if (!first) continue;
-    const inPeriod = num(first.period_count);
+    const returned = step.rowCount ?? step.rows?.length;
     const total = num(first.total_all);
+    // The server's count after the cap stands in for period_count when the
+    // query did not select one: both answer "how many matched", and a capped
+    // list with neither can only say that it was capped.
+    const inPeriod = num(first.period_count) ?? num(step.matchedRows);
     if (inPeriod === undefined && total === undefined) continue;
-    return { inPeriod, total, returned: step.rowCount ?? step.rows?.length };
+    return { inPeriod, total, returned };
   }
   return null;
 }
@@ -361,9 +365,22 @@ export function dataCoverage(trace: TraceStep[]): DataCoverage | null {
     }
   }
 
+  /* Two routes to the real total, and the server's own count is preferred:
+     period_count is only there when the model selected it, while the count
+     after the cap is taken every time the cap was hit. */
+  const returned = best.rowCount ?? rows.length;
+  const periodCount = Number(rows[0]?.period_count);
+  const matched =
+    best.matchedRows !== undefined && best.matchedRows > returned
+      ? best.matchedRows
+      : Number.isFinite(periodCount) && periodCount > returned
+        ? periodCount
+        : undefined;
+
   return {
-    rows: best.rowCount ?? rows.length,
+    rows: returned,
     limitReached: best.limitReached === true,
+    matched,
     filter: sqlDateFilter(best.sql!),
     span,
   };

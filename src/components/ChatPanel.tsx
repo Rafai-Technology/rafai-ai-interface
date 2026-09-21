@@ -403,7 +403,12 @@ const CalendarIcon = () => (
  * row limit; "All dates" when it had neither.
  */
 function CoverageBar({ coverage }: { coverage: DataCoverage }) {
-  const { filter, span, rows, limitReached } = coverage;
+  const { filter, span, rows, limitReached, matched } = coverage;
+  /* The row cap is invisible once the rows are in a table: 2,000 rows of
+     14,000 and 2,000 of 2,000 are the same table. dataCoverage has the real
+     total — the server's count after the cap, or the query's own
+     period_count — so say it rather than leave "more rows exist" to be read
+     as a handful. */
   const partial = limitReached || filter !== null;
   const period = filter === null
     ? 'All dates'
@@ -421,10 +426,14 @@ function CoverageBar({ coverage }: { coverage: DataCoverage }) {
           <span className="scope-tag">{partial ? 'Partial data' : 'All matching data'}</span>
         </span>
         <span className="scope-count">
-          <strong>{count(rows)}</strong> {rows === 1 ? 'row' : 'rows'}
+          {matched !== undefined
+            ? <>showing <strong>{count(rows)}</strong> of <strong>{count(matched)}</strong> rows</>
+            : <><strong>{count(rows)}</strong> {rows === 1 ? 'row' : 'rows'}</>}
           {spanText && <> · data {span!.min === span!.max ? 'on' : 'from'} {spanText.replace(/^from /, '')}</>}
         </span>
-        {limitReached && <span className="scope-cut">row limit reached — more rows exist</span>}
+        {limitReached && matched === undefined && (
+          <span className="scope-cut">row limit reached — more rows exist</span>
+        )}
       </div>
     </div>
   );
@@ -510,7 +519,9 @@ function Answer({ turn, mode, onAsk, busy }: {
   if (!turn.result) return null;
 
   const { text, chart: given, followups, scope } = parseAnswer(turn.result.answer);
-  const counts = scope ? scopeCounts(turn.result.trace) : null;
+  // Read for both bars: period_count is in the rows whether or not the model
+  // remembered to write a scope block.
+  const counts = scopeCounts(turn.result.trace);
   const coverage = scope ? null : dataCoverage(turn.result.trace);
   const chart =
     forecastChart(turn.result.trace) ?? given ?? inferChart(turn.result.trace);

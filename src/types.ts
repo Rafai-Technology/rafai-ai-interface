@@ -9,6 +9,9 @@ export interface TraceStep {
   rows?: Record<string, any>[];
   /** run_sql: the result stopped at the role's row limit; more rows exist. */
   limitReached?: boolean;
+  /** run_sql, when the limit was reached: how many rows the query matched in
+   *  all, counted by the server re-running it as a COUNT. */
+  matchedRows?: number;
   /** diagnose_process only: measured process findings, each with its own
    *  evidence and a recommendation anchored to a real benchmark. */
   findings?: Finding[];
@@ -103,6 +106,10 @@ export interface DataCoverage {
   rows: number;
   /** The query stopped at the row limit; more rows matched. */
   limitReached: boolean;
+  /** How many rows matched in all, when the server counted them after the cap
+   *  was hit (or the query's own period_count said so). Undefined when neither
+   *  was available, and the bar then says only that the limit was reached. */
+  matched?: number;
   /**
    * The date filter in the SQL. null: no date filter, so all dates.
    * `relative`: filtered with a date expression (GETDATE, DATEADD) rather

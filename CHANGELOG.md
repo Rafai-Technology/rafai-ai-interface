@@ -10,6 +10,22 @@ that ship no new behaviour.
 
 ## [Unreleased]
 
+### Changed
+
+- **The coverage bar gives the real total instead of "more rows exist".** A
+  capped result read as `2,000 rows · row limit reached — more rows exist`,
+  which says nothing about whether the missing rows are a handful or twelve
+  thousand. `dataCoverage` in `src/answer.ts` now takes the total from
+  `matchedRows` on the trace step — the server re-runs a capped query as a
+  COUNT and records what it would have returned — falling back to the query's
+  own `period_count` when it carried one, and `CoverageBar` renders `showing
+  2,000 of 36,394 rows`. `scopeCounts` takes the same fallback, so the scope
+  bar above a period-filtered list stops saying only "showing the latest 2,000"
+  when the model omitted `period_count`. Both still read from the trace, never
+  from the prose. The old wording remains for the shapes where no count could
+  be taken. `matchedRows` is new on `TraceStep` and `matched` on
+  `DataCoverage`; older saved traces simply lack them.
+
 ### Added
 
 - **Every answer that ran a query shows its date range and row count.** A
