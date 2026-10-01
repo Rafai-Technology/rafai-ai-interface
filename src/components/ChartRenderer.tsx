@@ -233,6 +233,10 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
   // projection and its interval are the answer, not decoration around it.
   if (spec.type === 'forecast') {
     const forecastSeries = ['actual', 'forecast', 'lower', 'upper'];
+    // The same step forecastChart() drew from: the latest successful one.
+    const method = [...(trace ?? [])]
+      .reverse()
+      .find((s) => s.tool === 'run_forecast' && s.status === 'ok' && s.rows?.length);
     return (
       <figure className="viz">
         <div className="viz-head">
@@ -268,6 +272,18 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
             <Forecast data={data} x={spec.x} mode={mode} />
           )}
         </div>
+        {(method?.formula?.length || method?.sourceSql) && (
+          <details className="viz-method">
+            <summary>How this forecast was calculated</summary>
+            {method.formula && method.formula.length > 0 && <pre>{method.formula.join('\n')}</pre>}
+            {method.sourceSql && (
+              <>
+                <p className="step-label">History taken from this query</p>
+                <pre>{method.sourceSql}</pre>
+              </>
+            )}
+          </details>
+        )}
         {card}
       </figure>
     );

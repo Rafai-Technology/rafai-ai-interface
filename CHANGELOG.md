@@ -12,6 +12,15 @@ that ship no new behaviour.
 
 ### Added
 
+- **Forecasts and diagnoses show their SQL and their formula.** "View SQL"
+  under a `diagnose_process`, `delivery_control` or `customer_profitability`
+  step now shows the statements the server ran, and the header counts them:
+  a diagnosis that read "0 queries · 2 steps" now gives the real number. A
+  `run_forecast` or `detect_anomalies` step shows "How it was calculated"
+  (the equation with its fitted numbers) and "Series taken from this query".
+  The forecast chart has the same under "How this forecast was calculated".
+  Needs the matching `rafai-ai` change; answers saved before it show neither.
+
 - **Every answer shows how long it took.** The "View SQL" line now ends with
   the wait and the database's share of it — `4 queries · 5 steps · 1 min 29 s
   (SQL 1 min 7 s)` — so a slow answer says at a glance whether the time went

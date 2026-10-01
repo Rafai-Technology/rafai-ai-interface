@@ -51,7 +51,12 @@ export function SqlInspector({
   // reassuring when someone is reading the trail to understand what happened.
   const blocked = trace.filter((s) => s.status === 'blocked').length;
   const suppressed = trace.filter((s) => s.status === 'suppressed').length;
-  const queries = trace.filter((s) => s.tool === 'run_sql').length;
+  /* Server-run tools (diagnose_process and the like) send their own
+     statements; they count, or an answer built on five queries says "0". */
+  const queries = trace.reduce(
+    (n, s) => n + (s.tool === 'run_sql' ? 1 : s.sql ? s.queryCount ?? 1 : 0),
+    0,
+  );
 
   return (
     <div className="inspector">
@@ -117,6 +122,18 @@ export function SqlInspector({
                   </span>
                 </div>
                 {step.sql && <pre className="sql">{step.sql}</pre>}
+                {step.formula && step.formula.length > 0 && (
+                  <>
+                    <p className="step-label">How it was calculated</p>
+                    <pre className="sql formula">{step.formula.join('\n')}</pre>
+                  </>
+                )}
+                {step.sourceSql && (
+                  <>
+                    <p className="step-label">Series taken from this query</p>
+                    <pre className="sql">{step.sourceSql}</pre>
+                  </>
+                )}
                 {step.logicSources && step.logicSources.length > 0 && (
                   <div className="logic-sources">
                     {/* Reference material, not a query result — deliberately

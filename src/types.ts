@@ -21,6 +21,14 @@ export interface TraceStep {
    * verifiable the same way a SQL query is — never just a name to trust.
    */
   logicSources?: { name: string; type: string; truncated: boolean; definition: string }[];
+  /** delivery_control / customer_profitability / diagnose_process: how many
+   *  statements the server ran for this step, all shown in `sql`. */
+  queryCount?: number;
+  /** run_forecast / detect_anomalies: the run_sql query the series came from.
+   *  Not in `sql`, because nothing ran in this step. */
+  sourceSql?: string;
+  /** run_forecast / detect_anomalies: the calculation with its fitted numbers. */
+  formula?: string[];
   /**
    * export_result only: what the user asked to be exported. Carries no file —
    * the browser builds it from rows already elsewhere in this same trace.
