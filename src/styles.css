@@ -761,8 +761,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .sql-block:hover .sql-copy, .sql-copy:focus-visible { opacity: 1; }
 .sql-copy:hover { color: var(--accent-deep); }
 .sql-copy.is-copied { color: var(--accent-deep); opacity: 1; }
-/* The forecast disclosure's blocks sit 8px down; keep the button inside them. */
-.viz-method .sql-copy { top: 14px; }
+/* These blocks sit 8px down from their wrapper; keep the button inside them. */
+.viz-method .sql-copy,
+.pnl-sql .sql-copy { top: 14px; }
 
 /* Labels a forecast step's formula and source query apart from each other. */
 .step-label {
@@ -2059,7 +2060,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .pnl-sql pre {
   margin: 8px 0 0; padding: 9px 11px; background: var(--plane);
   border-radius: 7px; font-size: 10.5px; line-height: 1.6; overflow-x: auto;
-  white-space: pre-wrap; color: var(--secondary);
+  white-space: pre-wrap; overflow-wrap: anywhere; color: var(--secondary);
 }
 
 /* loading */
@@ -2250,7 +2251,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .pm-sql pre {
   margin: 0; padding: 11px 13px; background: var(--plane); border-radius: 8px;
   font-size: 11.5px; line-height: 1.65; overflow-x: auto; white-space: pre-wrap;
-  color: var(--secondary);
+  overflow-wrap: anywhere; color: var(--secondary);
 }
 
 @media (max-width: 720px) {

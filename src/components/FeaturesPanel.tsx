@@ -4,6 +4,7 @@ import type { DashboardPanelResult, DashboardRun, DashboardSummary } from '../ty
 import { deleteDashboard, listDashboards, runDashboard, setDashboardPinned, reorderDashboardPanels } from '../api';
 import { ChartRenderer } from './ChartRenderer';
 import { IconPin } from './icons';
+import { SqlBlock } from './SqlBlock';
 
 /* ------------------------------------------------------------- formatting */
 
@@ -521,7 +522,7 @@ function PanelModal({ p, mode, role, onClose }: {
 
           <div className="pm-sql">
             <span className="pm-sql-label">The query this panel just ran</span>
-            <pre>{p.sql}</pre>
+            <SqlBlock sql={p.sql} className="" />
           </div>
         </div>
       </div>
@@ -675,7 +676,7 @@ function Panel({ p, mode, role, span, drag }: {
 
       <details className="pnl-sql">
         <summary>Show the query</summary>
-        <pre>{p.sql}</pre>
+        <SqlBlock sql={p.sql} className="" />
       </details>
      </div>
 

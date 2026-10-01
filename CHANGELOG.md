@@ -20,7 +20,8 @@ that ship no new behaviour.
   whitespace changes: strings, `[names]` and comments are copied as they
   are, so the copied query runs exactly as the original did. A query that
   already has line breaks is left alone. Every query, formula and source
-  query block in "View SQL", and under the forecast chart, now has a Copy
+  query block in "View SQL", under the forecast chart, and on Features
+  panels ("Show the query" and the expanded panel's query) now has a Copy
   button (`SqlBlock`), and long lines wrap instead of scrolling sideways.
 
 - **Forecasts and diagnoses show their SQL and their formula.** "View SQL"
