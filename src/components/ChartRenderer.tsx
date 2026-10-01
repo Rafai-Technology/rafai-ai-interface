@@ -9,6 +9,7 @@ import { PALETTE, type Mode } from '../theme';
 import { makeCategoryFormat } from '../format';
 import { exportAsPdf, exportChartAsPng, exportRowsAsCsv, provenanceFrom } from '../export';
 import { ExportFileCard } from './ExportFileCard';
+import { SqlBlock } from './SqlBlock';
 import { IconDownload } from './icons';
 
 interface Props {
@@ -275,11 +276,13 @@ export function ChartRenderer({ spec, rows, mode, exportRequest, trace, role }: 
         {(method?.formula?.length || method?.sourceSql) && (
           <details className="viz-method">
             <summary>How this forecast was calculated</summary>
-            {method.formula && method.formula.length > 0 && <pre>{method.formula.join('\n')}</pre>}
+            {method.formula && method.formula.length > 0 && (
+              <SqlBlock sql={method.formula.join('\n')} className="" format={false} />
+            )}
             {method.sourceSql && (
               <>
                 <p className="step-label">History taken from this query</p>
-                <pre>{method.sourceSql}</pre>
+                <SqlBlock sql={method.sourceSql} className="" />
               </>
             )}
           </details>

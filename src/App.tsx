@@ -359,7 +359,12 @@ export default function App() {
              back button should return to mid-conversation. */
           navigate(`/c/${result.conversation_id}`, { replace: true });
         }
-        await reloadChats();
+        /* Best-effort and outside the answer's fate. This used to be awaited
+           here, so a sidebar refresh that hit a network blip threw the
+           browser's bare "Failed to fetch" into the catch below, which
+           stamped it over an answer that had already landed: the error
+           showed, and a refresh revealed the answer (c/10409, 1 Oct 2026). */
+        reloadChats().catch(() => {});
       } catch (e: any) {
         if (frame) cancelAnimationFrame(frame);
         /* A dropped connection is not the same as a failed answer. A long
@@ -389,14 +394,16 @@ export default function App() {
               setChatId(recovered.conversation_id);
               navigate(`/c/${recovered.conversation_id}`, { replace: true });
             }
-            await reloadChats();
+            reloadChats().catch(() => {});
             return;
           }
         }
 
         setTurns((t) =>
           t.map((turn) =>
-            turn.id === id
+            // An answer already on screen is never replaced by an error from
+            // something that ran after it.
+            turn.id === id && !turn.result
               ? { ...turn, error: e.message ?? 'The request failed.', pending: false, live: undefined }
               : turn,
           ),

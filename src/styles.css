@@ -740,9 +740,29 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;
-  white-space: pre;
+  /* Wrapped, never a sideways scroll: a query that ran off the panel hid its
+     own WHERE clause. SqlBlock lays it out over lines first. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--secondary);
 }
+
+/* A query with its copy button pinned to the top-right corner. */
+.sql-block { position: relative; }
+.sql-block > pre { padding-right: 76px; }
+.sql-copy {
+  position: absolute; top: 6px; right: 6px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); font-size: 11px; cursor: pointer;
+  opacity: 0.75; transition: opacity 0.15s, color 0.15s;
+}
+.sql-block:hover .sql-copy, .sql-copy:focus-visible { opacity: 1; }
+.sql-copy:hover { color: var(--accent-deep); }
+.sql-copy.is-copied { color: var(--accent-deep); opacity: 1; }
+/* The forecast disclosure's blocks sit 8px down; keep the button inside them. */
+.viz-method .sql-copy { top: 14px; }
 
 /* Labels a forecast step's formula and source query apart from each other. */
 .step-label {

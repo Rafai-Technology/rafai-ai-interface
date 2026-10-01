@@ -12,6 +12,17 @@ that ship no new behaviour.
 
 ### Added
 
+- **Queries are laid out over lines and have a copy button.** The model
+  writes SQL on one line, and shown as written it ran off the side of the
+  panel. `formatSql` (`src/sqlFormat.ts`) breaks a one-line query at its
+  clauses, one SELECT column and one WHERE/HAVING/ON condition per line,
+  leaving `BETWEEN … AND` and anything inside a CASE where they are. Only
+  whitespace changes: strings, `[names]` and comments are copied as they
+  are, so the copied query runs exactly as the original did. A query that
+  already has line breaks is left alone. Every query, formula and source
+  query block in "View SQL", and under the forecast chart, now has a Copy
+  button (`SqlBlock`), and long lines wrap instead of scrolling sideways.
+
 - **Forecasts and diagnoses show their SQL and their formula.** "View SQL"
   under a `diagnose_process`, `delivery_control` or `customer_profitability`
   step now shows the statements the server ran, and the header counts them:
@@ -28,6 +39,16 @@ that ship no new behaviour.
   4.2 s" in the same place. The time comes from the server (`duration_ms` on
   the answer, `durationMs` on a saved turn), so a reopened chat shows the same
   figure; turns saved before the server recorded it show none.
+
+### Fixed
+
+- **A finished answer no longer turns into "Failed to fetch".** After an
+  answer arrived, the chat list was refreshed inside the same `try`; when
+  that request hit a network blip, the browser's bare "Failed to fetch"
+  reached the catch, which marked the turn as failed. Errors are shown in
+  place of results, so the answer was hidden until a page refresh revealed
+  it (c/10409). The refresh is now best-effort, and an error never replaces
+  an answer that already landed.
 
 ### Changed
 

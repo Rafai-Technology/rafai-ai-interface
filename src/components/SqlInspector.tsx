@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { TraceStep } from '../types';
+import { SqlBlock } from './SqlBlock';
 
 /**
  * Non-negotiable for trust: when an answer looks wrong, somebody has to be able
@@ -121,17 +122,17 @@ export function SqlInspector({
                     )}
                   </span>
                 </div>
-                {step.sql && <pre className="sql">{step.sql}</pre>}
+                {step.sql && <SqlBlock sql={step.sql} />}
                 {step.formula && step.formula.length > 0 && (
                   <>
                     <p className="step-label">How it was calculated</p>
-                    <pre className="sql formula">{step.formula.join('\n')}</pre>
+                    <SqlBlock sql={step.formula.join('\n')} className="sql formula" format={false} />
                   </>
                 )}
                 {step.sourceSql && (
                   <>
                     <p className="step-label">Series taken from this query</p>
-                    <pre className="sql">{step.sourceSql}</pre>
+                    <SqlBlock sql={step.sourceSql} />
                   </>
                 )}
                 {step.logicSources && step.logicSources.length > 0 && (
@@ -153,7 +154,7 @@ export function SqlInspector({
                             </span>
                           )}
                         </summary>
-                        <pre className="sql">{src.definition}</pre>
+                        <SqlBlock sql={src.definition} format={false} />
                       </details>
                     ))}
                   </div>
