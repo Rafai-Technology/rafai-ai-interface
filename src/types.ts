@@ -64,6 +64,9 @@ export interface AskResult {
   /** The stored turn just created, so it can be edited or re-run without
    *  refetching the thread. Null if the history write failed. */
   turn_id?: string | null;
+  /** How long the user waited for this answer, request to reply, in ms. Null
+   *  on turns saved before the server recorded it. */
+  duration_ms?: number | null;
   /** Files attached to this conversation that were actually placed in the
    *  model's context for this turn — shown for the same reason SQL is shown:
    *  every source the answer could see should be visible, not just trusted. */
@@ -193,6 +196,8 @@ export interface HistoryTurn {
   answer: string;
   hops: number;
   trace: TraceStep[];
+  /** Null on turns saved before the server recorded it. */
+  durationMs?: number | null;
   createdAt: string;
 }
 

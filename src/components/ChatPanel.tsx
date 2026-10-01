@@ -588,7 +588,11 @@ function Answer({ turn, mode, onAsk, busy }: {
           ))}
         </div>
       )}
-      <SqlInspector trace={turn.result.trace} hops={turn.result.hops} />
+      <SqlInspector
+        trace={turn.result.trace}
+        hops={turn.result.hops}
+        durationMs={turn.result.duration_ms ?? null}
+      />
       <FollowUps items={followups} onAsk={onAsk} busy={busy} />
     </>
   );

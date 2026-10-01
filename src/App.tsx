@@ -38,7 +38,13 @@ const toTurn = (role: string) => (h: HistoryTurn): Turn => ({
   question: h.question,
   role,
   pending: false,
-  result: { answer: h.answer, trace: h.trace, hops: h.hops, usage: { input: 0, output: 0, cacheRead: 0 } },
+  result: {
+    answer: h.answer,
+    trace: h.trace,
+    hops: h.hops,
+    usage: { input: 0, output: 0, cacheRead: 0 },
+    duration_ms: h.durationMs ?? null,
+  },
 });
 
 export default function App() {

@@ -6,17 +6,45 @@ import type { TraceStep } from '../types';
  * to see why. Refusals are shown here too — a blocked query is the most
  * interesting thing this panel ever displays.
  */
+/** "8.4 s", "42 s", "1 min 29 s". */
+export function formatSeconds(ms: number): string {
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)} s`;
+  const whole = Math.round(s);
+  if (whole < 60) return `${whole} s`;
+  const min = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return rest ? `${min} min ${rest} s` : `${min} min`;
+}
+
 export function SqlInspector({
   trace,
   hops,
+  durationMs = null,
   defaultOpen = false,
 }: {
   trace: TraceStep[];
   hops: number;
+  /** How long the user waited for the answer. Null on older saved turns. */
+  durationMs?: number | null;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  if (!trace.length) return null;
+  /* The database's share of the wait, so a slow answer says whether it was
+     the queries or the model: ARCO's 89 s answer was 67 s of SQL. */
+  const sqlMs = trace.reduce((sum, s) => sum + (s.tool === 'run_sql' ? s.durationMs ?? 0 : 0), 0);
+  const timing =
+    durationMs != null
+      ? formatSeconds(durationMs) + (sqlMs > 0 ? ` (SQL ${formatSeconds(sqlMs)})` : '')
+      : null;
+  const timingTitle =
+    'Time from sending the question to the finished answer. SQL is the part spent in the database.';
+
+  if (!trace.length) {
+    return timing ? (
+      <div className="answer-time" title={timingTitle}>Answered in {timing}</div>
+    ) : null;
+  }
 
   // Counted separately. They are different events and lumping them together
   // made a suppressed result look like a refused one, which is the opposite of
@@ -36,6 +64,7 @@ export function SqlInspector({
         View SQL
         <span className="inspector-meta">
           {queries} {queries === 1 ? 'query' : 'queries'} · {hops} {hops === 1 ? 'step' : 'steps'}
+          {timing && <span className="inspector-time" title={timingTitle}>· {timing}</span>}
           {blocked > 0 && (
             /* Deliberately does NOT say "outside this role's access". Most
                refusals are not access refusals at all — SELECT *, an

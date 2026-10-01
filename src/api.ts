@@ -270,6 +270,7 @@ export async function recoverAskResult(
         usage: { input: 0, output: 0, cacheRead: 0 },
         conversation_id: id,
         turn_id: last.id,
+        duration_ms: last.durationMs ?? null,
       };
     } catch {
       // The thread read failed too — probably the same underlying outage.

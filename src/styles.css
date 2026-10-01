@@ -702,6 +702,8 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .caret.open { transform: rotate(90deg); }
 
 .inspector-meta { color: var(--muted); font-weight: 400; display: inline-flex; align-items: center; gap: 8px; }
+.inspector-time { margin-left: -4px; font-variant-numeric: tabular-nums; }
+.answer-time { color: var(--muted); font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
 .badge {
   font-size: 10.5px; padding: 1px 7px; border-radius: 999px;
